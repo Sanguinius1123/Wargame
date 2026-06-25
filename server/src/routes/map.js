@@ -1,0 +1,150 @@
+import { Router } from 'express';
+import { adminDb } from '../db.js';
+import { requireAuth, requireGM } from '../middleware/auth.js';
+import { computeVisibility, markScouted } from '../utils/visibility.js';
+
+const router = Router();
+
+// GET /api/map/:gameId/hexes
+// GM: all hexes with units. Player: fog-of-war filtered.
+router.get('/:gameId/hexes', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  // Load all hexes (GM queries bypass RLS via adminDb)
+  const { data: hexes, error } = await adminDb
+    .from('hexes')
+    .select('id, hex_q, hex_r, terrain, development, owner_faction_id')
+    .eq('game_id', gameId);
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Load all units grouped by hex
+  const { data: units } = await adminDb
+    .from('units')
+    .select('hex_q, hex_r, quantity, faction_id, factions(name, color), unit_type_config(name, category)')
+    .eq('game_id', gameId);
+
+  const unitsByHex = {};
+  for (const u of units ?? []) {
+    const k = `${u.hex_q},${u.hex_r}`;
+    if (!unitsByHex[k]) unitsByHex[k] = [];
+    unitsByHex[k].push({
+      type: u.unit_type_config?.name,
+      category: u.unit_type_config?.category,
+      quantity: u.quantity,
+      factionId: u.faction_id,
+      factionName: u.factions?.name,
+      factionColor: u.factions?.color,
+    });
+  }
+
+  if (isGM) {
+    return res.json(hexes.map(h => ({
+      ...h,
+      units: unitsByHex[`${h.hex_q},${h.hex_r}`] ?? [],
+      visibility: 'visible',
+    })));
+  }
+
+  // Player path: find their faction, compute visibility
+  const { data: faction } = await adminDb
+    .from('factions')
+    .select('id')
+    .eq('game_id', gameId)
+    .eq('profile_id', req.user.id)
+    .single();
+
+  if (!faction) return res.status(403).json({ error: 'Not a participant in this game' });
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  const { visible, scouted } = await computeVisibility(adminDb, faction.id, gameId);
+
+  markScouted(adminDb, faction.id, gameId, visible, game?.current_turn ?? 0);
+
+  res.json(hexes.map(h => {
+    const k = `${h.hex_q},${h.hex_r}`;
+    if (visible.has(k)) {
+      return { ...h, units: unitsByHex[k] ?? [], visibility: 'visible' };
+    }
+    if (scouted.has(k)) {
+      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, development: h.development, visibility: 'scouted', units: [] };
+    }
+    return { hex_q: h.hex_q, hex_r: h.hex_r, visibility: 'dark', units: [] };
+  }));
+});
+
+// GET /api/map/:gameId/hexes/:q/:r — single hex detail
+router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
+  const { gameId, q, r } = req.params;
+
+  const { data: hex } = await adminDb
+    .from('hexes')
+    .select('*, terrain_type_config(*)')
+    .eq('game_id', gameId)
+    .eq('hex_q', q)
+    .eq('hex_r', r)
+    .single();
+
+  if (!hex) return res.status(404).json({ error: 'Hex not found' });
+
+  const { data: units } = await adminDb
+    .from('units')
+    .select('id, quantity, faction_id, factions(name, color), unit_type_config(name, category, attack, defense, movement, los_range)')
+    .eq('game_id', gameId)
+    .eq('hex_q', q)
+    .eq('hex_r', r);
+
+  res.json({ ...hex, units: units ?? [] });
+});
+
+// PATCH /api/map/:gameId/hexes/:q/:r — GM edits a hex
+router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
+  const { gameId, q, r } = req.params;
+  const { terrain, development, owner_faction_id } = req.body;
+
+  const updates = {};
+  if (terrain !== undefined) updates.terrain = terrain;
+  if (development !== undefined) updates.development = development;
+  if (owner_faction_id !== undefined) updates.owner_faction_id = owner_faction_id;
+
+  const { data, error } = await adminDb
+    .from('hexes')
+    .update(updates)
+    .eq('game_id', gameId)
+    .eq('hex_q', q)
+    .eq('hex_r', r)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /api/map/:gameId/orders — player queues a movement order
+router.post('/:gameId/orders', requireAuth, async (req, res) => {
+  const { unit_id, to_hex_q, to_hex_r } = req.body;
+
+  // Verify player owns the unit
+  const { data: unit } = await adminDb
+    .from('units')
+    .select('id, factions(profile_id)')
+    .eq('id', unit_id)
+    .single();
+
+  if (!unit || unit.factions?.profile_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your unit' });
+  }
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+
+  const { data, error } = await adminDb
+    .from('movement_orders')
+    .upsert({ unit_id, game_id: req.params.gameId, to_hex_q, to_hex_r, turn: game.current_turn }, { onConflict: 'unit_id' })
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+export default router;
