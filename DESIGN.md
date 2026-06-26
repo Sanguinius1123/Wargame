@@ -69,8 +69,8 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
 2. **Materials collected.** +1 per owned resource tile.
 3. **Production queue advances.** All `pending` orders → `ready`. Units available to place at start of next turn.
 4. **Manpower calculated and held.** Flood-fill from each owned `has_settlement` hex through contiguous `has_urban` tiles. Total = manpower budget available to spend at the start of the next turn. Damaged urban tiles produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
-5. **Settlement control confirmed.** Final ownership of all `has_settlement` hexes locked in from Phase 3 hex captures. This is the authoritative state used for both manpower calculation (step 4) and the win condition check.
-6. **Win condition check.** Count `has_settlement` hexes per faction using confirmed ownership. Any faction holding ≥ 2/3 of all settlements → wins.
+5. **Settlement control evaluated.** For each settlement: assign urban tiles by proximity (see Settlement Control rules), count ownership, apply the 3/4 threshold. Each settlement resolves to controlled (by one faction) or contested. This result drives both manpower calculation (step 4) and the win condition check.
+6. **Win condition check.** Count settlements in a **controlled** state per faction. Any faction controlling ≥ 2/3 of all settlements → wins. Contested settlements count for no one.
 7. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
 
 ---
@@ -157,11 +157,36 @@ LOS is blocked by Mountains and vegetation attributes (see Hex Attributes). Unit
 
 **Artillery elevation bonus:** `effective_range = base_range + max(0, firer_elevation − target_elevation)`. Terrain between firer and target does not block the shot arc.
 
-### Hex Ownership and Win Condition
+### Hex Ownership
 
-A hex is owned by whichever faction last controlled it. Capturing = have units there with no enemies at end of Phase 3.
+A hex is owned by whichever faction last controlled it. Capturing = have units there with no enemies present at end of Phase 3.
 
-**Win condition:** Hold **2/3 of all `has_settlement` hexes** on the map at end of your turn. Threshold is tunable per player count (lower in 3+ player games). Settlement count is set at map creation by GM.
+### Settlement Control
+
+Owning the `has_settlement` hex is not sufficient — a settlement is only **controlled** if one player owns at least **3/4 of all urban tiles assigned to it**.
+
+**Assigning urban tiles to settlements:**
+1. Flood-fill from each `has_settlement` hex through contiguous `has_urban` tiles to find that settlement's urban cluster.
+2. If two settlements' urban clusters are adjacent or overlapping (their urban sprawl touches), each `has_urban` tile is assigned to whichever settlement hex is closer (shortest hex distance).
+3. **Tie-break:** if a tile is equidistant from two settlements, it is assigned to whichever settlement is owned by the same faction that owns that tile. If the tie cannot be resolved this way (the tile owner owns neither or both settlements), the tile is counted as contested and belongs to neither settlement's cluster.
+
+**Control threshold:**
+```
+controlled_by = P  if  (tiles owned by P / total assigned tiles) ≥ 3/4
+contested          if  no single player meets the 3/4 threshold
+```
+
+**Contested settlements:**
+- No faction collects manpower from them.
+- No faction counts them toward the victory condition.
+- The settlement hex itself may be owned by one player, but ownership alone grants nothing until the urban threshold is met.
+
+**Controlled settlements:**
+- The controlling faction collects manpower equal to the full urban tile count assigned to that settlement (not just the tiles they personally own — you control the city, you get the whole city's output).
+
+### Win Condition
+
+Hold **2/3 of all `has_settlement` hexes** in a **controlled** state (not contested) at the end of Phase 4. Threshold is tunable per player count. Settlement count set at map creation by GM.
 
 ---
 
@@ -798,14 +823,15 @@ Produced by specific resource tiles placed by the GM on the map. Each tile produ
 ### Manpower
 **Not saveable.** Generated each turn, must be spent that turn or lost.
 
-Manpower per turn = sum over all controlled settlements of their connected urban tile count. "Connected" = contiguous cluster of `has_urban` hexes attached to the `has_settlement` hex (flood-fill adjacency).
+Manpower per turn = sum over all **controlled** settlements of their assigned urban tile count (see Settlement Control). Contested settlements produce zero manpower for anyone.
 
-- Small town (4 connected urban tiles) → 4 manpower/turn
-- Large city (10 connected urban tiles) → 10 manpower/turn
+- Small town (4 assigned urban tiles, controlled) → 4 manpower/turn
+- Large city (10 assigned urban tiles, controlled) → 10 manpower/turn
+- Contested city (any size) → 0 manpower/turn
 
-Controlling urban sprawl around a settlement directly increases your manpower budget. Expensive constructions (Manufacturing Facility = 20 manpower) require large cities or multiple cities active in the same turn.
+Controlling the urban sprawl around a settlement — not just the settlement hex itself — is what generates manpower. Expensive constructions (Manufacturing Facility = 20 manpower) require large cities or multiple cities active in the same turn.
 
-Manpower spent on construction is committed to the building and persists as HP progress. Manpower not spent on anything is wasted at end of turn.
+Manpower not spent during the ordering phase is wasted.
 
 ---
 
