@@ -28,10 +28,15 @@ Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval
 - Naval bombardment resolves (Battleship strikes against land targets)
 - Air-to-ground strikes resolve (surviving bombers from Phase 1)
 
-**Phase 4 — Collect**
-- Resources collected from owned hexes
-- Production queue advances; completed units spawn at facilities
+**Phase 4 — Return and Collect**
+- All air units fly home and land (fighters, bombers, scouts return to nearest friendly airstrip/airbase or carrier at its current position)
+- Air units that cannot reach any friendly landing site crash
+- Manpower calculated from current owned settlements (flood-fill)
+- Materials collected from owned resource tiles
+- Production queue advances: `pending` → `ready` (units available to place next turn)
+- Manpower spent on queued production and building construction; remainder wasted
 - `turn_ready` reset for all players, turn counter increments
+- **Win condition check** — if any faction holds ≥ 2/3 of `has_settlement` hexes, they win
 
 ---
 
@@ -90,11 +95,15 @@ Resources are not produced by terrain type. They are produced by specific resour
 
 ### Elevation and LOS
 
-| Terrain | Elevation | LOS bonus (when standing on) |
+**LOS** (line of sight) = the radius in hexes a unit can see around itself. A unit with LOS 3 sees its own hex and every hex within 3 hexes. Elevation increases LOS range — a unit on Hills sees 1 hex further; on Mountains, 2 hexes further.
+
+| Terrain | Elevation | LOS bonus |
 |---|---|---|
 | Plains / Desert / Wetlands / Water | 0 | +0 |
-| Hills | 1 | +1 |
-| Mountains | 2 | +2 |
+| Hills | 1 | +1 hex LOS |
+| Mountains | 2 | +2 hex LOS |
+
+LOS is blocked by Mountains and vegetation attributes (see Hex Attributes). Unit facing is not modeled — LOS is a full circle around the unit.
 
 **Artillery elevation bonus:** `effective_range = base_range + max(0, firer_elevation − target_elevation)`. Terrain between firer and target does not block the shot arc.
 
@@ -173,7 +182,7 @@ Canals (`has_canal`) allow naval units to traverse Wetlands hexes. They have no 
 
 **Mountains and mechanized:** Vehicles cannot enter Mountains without a road. Supply trucks build roads in **adjacent** hexes without entering them — park at the mountain's edge and construct the path forward. Infantry can screen the supply truck while it works.
 
-**Road construction rate:** Supply truck builds road segments in adjacent hexes. Each segment costs 1 manpower. Max segments buildable per turn depends on terrain of the hex being built into:
+**Road construction rate:** Supply truck builds road segments in adjacent hexes. Manpower cost per segment varies by terrain. Max segments buildable per turn depends on terrain of the hex being built into:
 
 | Target terrain | Max segments/turn | Manpower per segment |
 |---|---|---|
@@ -239,7 +248,8 @@ HP = material cost for mat-based buildings. This makes all math trivial: **1 mat
 
 **Repair costs:**
 ```
-Naval (at Harbor):    ceil(build_cost / 4)  → restores to full HP
+Naval (at Harbor):    ceil(mat_cost / 4) materials + ceil(man_cost / 4) manpower → full HP, instant (1 turn)
+                      Uses a production slot at the Harbor.
 
 Mat-based buildings:  1 mat + 1 man per HP restored (same rate as construction)
 
@@ -253,8 +263,12 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 - `destroyed`: HP = 0. Non-functional. Tag stays on hex.
 
 **Damage states:**
-- `is_damaged` — HP between 1 and 50% of max (after being operational). Reduced output. Bridges still passable.
+- `is_damaged` — HP between 1 and 50% of max (after being operational). Reduced output. Bridges still passable. Airbases/airstrips can still land and take off — only production stops.
 - `is_destroyed` — HP = 0. Non-functional. Bridge impassable. Tag stays on hex.
+
+**Under-construction buildings bombed to 0 HP:** building vanishes entirely (no destroyed tag left on hex). No refund.
+
+**Hex capture and buildings:** When a hex changes ownership, all buildings and infrastructure on it transfer to the new owner in whatever state they are in (including under-construction buildings). The new owner can continue construction, use, or repair them.
 
 **Production chain:**
 - Ground units: produced at Manufacturing Facility
@@ -359,7 +373,9 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 
 The fundamental unit of air action. Players compose flight groups; individual air unit orders are not used.
 
-**Composition:** any fighters (escort) + any bombers (strike). Fighter-only groups valid for scouting, sweeps, and LOS missions.
+**Composition:** any fighters (escort) + any bombers (strike) + any scout planes (LOS). Fighter-only or scout-only groups are valid. Scout planes do not attack but provide excellent LOS along the flight path.
+
+**Scout planes in groups:** A scout plane joining a flight group with fighters loses the stealth advantage of flying alone — the group's detection threshold uses the least-stealthy member. Flying a scout plane solo (or with other scout planes only) keeps stealth intact and makes detection very unlikely. However, if a solo scout group IS detected, it cannot fight back and will be shot down by interceptors. AA fires at all detected aircraft regardless of type — a scout in a detected group can be hit.
 
 **Mission types:**
 
@@ -399,6 +415,8 @@ Standing order for fighters. Fighter stays in designated hex; intercepts any ene
 **Patrol area:** all hexes within X of the patrol hex (range TBD, 1–2, pending balance).
 
 Patrol persists turn to turn. Patrolling fighter cannot also move. Undetected stealth flight groups pass through without triggering intercept.
+
+**Patrol engages every group** — each detected flight group that enters the patrol area triggers a separate intercept combat. Casualties from each engagement apply immediately before the next group is engaged. This means sending a fighter group first to attrit the defending patrol, then following with bombers, is a valid tactic.
 
 ---
 
@@ -465,28 +483,28 @@ Combat against naval units produces HP damage rather than quantity casualties. N
 
 ### AA Gun — Overwatch Skies
 
-AA Guns have one set of base stats (stored in unit_type_config) used for ground combat. They fire at air units using a separate **overwatch_to_hit** and **overwatch_pen** stat.
+AA Guns have base stats used for ground combat and separate overwatch stats (`overwatch_attack`, `overwatch_pen`) for firing at air units.
 
-| Mode | Trigger | To-Hit | Pen | Range | Cap |
-|---|---|---|---|---|---|
-| Ground combat (Phase 3) | Enemy ground in hex | 9 | 1 | 1 | — |
-| Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 4 | 0 | 2 | 3 groups/turn |
+| Mode | Trigger | Attack | Pen | Range |
+|---|---|---|---|---|
+| Ground combat (Phase 3) | Enemy ground in hex | 5 | 1 | 1 |
+| Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 10 | 0 | 2 |
 
-Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range 2 triggers AA fire automatically, up to 3 groups per AA unit per turn. Cap resets each turn.
+Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range 2 triggers AA fire automatically. **AA fires once per flight group** — each group that enters the overwatch zone is engaged separately, regardless of how many groups pass through. This prevents players from using a sacrificial plane group to exhaust AA defenses before sending the main strike.
 
 ### Terrain in Combat
 
-**`combat_modifier`** — applies to To-Hit rolls for all units fighting FROM that hex.
+**`combat_modifier`** — bonus added to a unit's Attack stat when fighting FROM that hex. High ground makes you a better attacker (roll ≤ Attack + CM to hit).
 
-**Defense bonuses** — added to effective defense in the save formula: `save_threshold = 14 − (defense + defense_bonus) + penetration`
+**Defense bonuses** — added to effective defense in the save formula.
 
 | Source | Bonus | Applies to | Condition |
 |---|---|---|---|
-| Higher elevation than attacker | +1 | Ground vs ground only | Unit did not move this turn |
-| `has_light_vegetation` | +1 | All attacks including bombardment | Unit did not move this turn |
-| `has_heavy_vegetation` | +2 | All attacks including bombardment | Unit did not move this turn |
+| Higher elevation than attacker | +1 | Ground vs ground only | Defender didn't move; attacker is on lower terrain |
+| `has_light_vegetation` | +1 | All attacks including bombardment | Defender didn't move this turn |
+| `has_heavy_vegetation` | +2 | All attacks including bombardment | Defender didn't move this turn |
 
-Elevation bonus does **not** apply against air attacks or bombardment/bombing runs. Vegetation bonuses **do** apply against bombardment. Units that moved this turn receive no defense bonuses.
+**Elevation check for defense bonus:** Hills defender gets +1 only if attacker is on Plains/Desert/Wetlands/Water. Mountains defender gets +1 only if attacker is not also on Mountains. Elevation bonus does **not** apply against air attacks or bombardment. Vegetation bonuses **do** apply against bombardment. Units that moved receive no defense bonuses.
 
 ### Combat Formula (Simultaneous Volleys)
 
@@ -560,7 +578,7 @@ Air:
 
 `Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills).
 
-**Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = floor(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
+**Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
 
 **Artillery in direct combat** — artillery has 0 attack dice when enemies enter its hex. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
 
@@ -602,7 +620,7 @@ Bombardment is indirect fire — the target does not fire back. Resolves in Phas
 ### Rules Common to All Bombardment
 
 **Two rolls per targeted hex:**
-1. **vs Units** — one 2d6 roll per bombarder. Each roll ≥ To-Hit → 1 hit. Each hit: randomly select a unit in the hex to receive it; that unit makes a normal defense save (roll 2d6 ≥ 14 − defense + pen, using the bombarder's penetration stat). Failed save = 1 casualty or 1 HP damage as normal.
+1. **vs Units** — one 2d6 roll per bombarder. Each roll ≥ bombarder's Attack → 1 hit. Each hit: select a unit to receive it **proportional to unit count** (a hex with 10 infantry and 2 armor has a 10/12 chance of hitting infantry). That unit makes a normal defense save. Failed save = 1 casualty or 1 HP damage as normal.
 2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≥ To-Hit → 1 infrastructure hit. **No defense roll for infrastructure.** Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road). If it has HP → loses 1 HP. If it has no HP (urban, vegetation, road) → immediately set to damaged, or destroyed if already damaged.
 
 Multiple bombarders targeting the **same hex** pool their rolls as a single simultaneous attack — hits are totalled before any are applied.
@@ -654,9 +672,11 @@ Stealth units are invisible until detected — they do not appear on enemy maps 
 | Situation | Own Casualties | Enemy Casualties |
 |---|---|---|
 | Had LOS to battle | Exact | Exact |
-| In battle, no LOS | Exact | Estimated (±20–30%) |
+| In battle, no LOS | Exact | Partial — see below |
 | Blind bombardment | No report | No report |
 | Flight group destroyed | — | No report |
+
+**Partial intel (in battle, no external LOS):** When your units fought but you had no observer in LOS range, you know your own losses exactly. For each enemy unit that participated, roll independently: **2/3 chance (67%)** that unit appears in your battle report. Units that fail the roll are not reported — you know a battle occurred and what you lost, but your picture of the enemy force is incomplete.
 
 ---
 
@@ -695,6 +715,8 @@ Manpower spent on construction is committed to the building and persists as HP p
 **Resource payment:** Materials deducted from stockpile immediately. Manpower reserved from this turn's collection (Phase 4). If a settlement is captured or destroyed before Phase 4 and manpower falls short, production is cancelled (materials refunded).
 
 `production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
+
+**Production capacity** *(open design question)*: Manufacturing Facilities likely have a limited number of production slots per turn. Naval repair at Harbor also uses a slot. How many slots per facility, and do larger/more expensive units consume more slots? TBD before implementation.
 
 ---
 
