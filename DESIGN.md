@@ -462,32 +462,37 @@ Combat against naval units produces HP damage rather than quantity casualties. N
 
 ### Combat Formula (Simultaneous Volleys)
 
+Both rolls use the same direction: **roll 2d6 equal to or above your number to succeed.**
+
 **Attack roll — each unit rolls once:**
 ```
-Roll 2d6 ≥ effectiveness → 1 hit
+Roll 2d6 ≥ To-Hit → 1 hit
 ```
 
 **Save roll — defender rolls once per hit received:**
 ```
-Roll 2d6 ≤ (defense − penetration) → saved
+save_threshold = 14 − defense + penetration
+Roll 2d6 ≥ save_threshold → saved
 otherwise → 1 casualty (ground) or 1 HP damage (naval)
 ```
 
-If `defense − penetration < 2` → impossible to save (all hits deal casualties).
+If `defense − penetration < 2` → save_threshold > 12 → impossible to save (all hits deal casualties).
 
 Both sides roll simultaneously. Casualties and HP damage are removed after both volleys fully resolve.
 
-**Probability reference:**
+**Unified probability table (roll ≥ n on 2d6):**
 
-| Roll ≤ n (save) | Save % | Roll ≥ n (hit) | Hit % |
-|---|---|---|---|
-| ≤ 4 | 17% | ≥ 4 | 83% |
-| ≤ 5 | 28% | ≥ 5 | 72% |
-| ≤ 6 | 42% | ≥ 6 | 58% |
-| ≤ 7 | 58% | ≥ 7 | 42% |
-| ≤ 8 | 72% | ≥ 8 | 28% |
-| ≤ 9 | 83% | ≥ 9 | 17% |
-| ≤ 10 | 92% | ≥ 10 | 8% |
+| Roll needed | Chance |
+|---|---|
+| ≥ 4 | 92% |
+| ≥ 5 | 83% |
+| ≥ 6 | 72% |
+| ≥ 7 | 58% |
+| ≥ 8 | 42% |
+| ≥ 9 | 28% |
+| ≥ 10 | 17% |
+| ≥ 11 | 8% |
+| ≥ 12 | 3% |
 
 ### Target Allocation (Proportional Fire)
 
