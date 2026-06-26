@@ -156,29 +156,22 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 Costs are stored internally on a **×3 scale** (all movement stats and terrain costs multiplied by 3) so that the 2/3 road multiplier resolves as integers. User-facing values below; engine values = user value × 3.
 
-**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder.
-
-**Impassable threshold:** If `terrain_cost ≥ 2 × remaining_movement`, the hex is **impassable** for that unit at that point in its move. This makes high-cost terrain act as a hard blocker for slow units:
-- Infantry (mv=2) cannot enter Mountains (cost=4) — 4 = 2×2.
-- Infantry CAN enter Mountains on a road (road cost=2.67 < 4).
-- Armor (mv=4) CAN enter Mountains (4 < 2×4=8).
-- AA Gun (mv=1) cannot enter Hills (cost=2) — 2 = 2×1.
-- Supply (mv=4) can only enter Mountains as their first move — if they spend any MP first, remaining drops below the threshold.
-
-The check uses *remaining* movement, not base movement. Units commit to high-cost terrain early in their move.
+**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder. Every ground unit can always enter at least 1 hex — no terrain cost alone makes a ground hex impassable to a foot unit.
 
 | Terrain | foot | mechanized | naval | air |
 |---|---|---|---|---|
 | Plains | 1 | 1 | impassable | passable |
 | Hills | 2 | 2 | impassable | passable |
-| Mountains | **4** | **4** | impassable | passable |
+| Mountains | 4 | **impassable** | impassable | passable |
 | Desert | 2 | 1 | impassable | passable |
-| Wetlands | 2 | 4 | impassable* | passable |
+| Wetlands | 2 | **4** | impassable | passable |
 | Water | impassable | impassable | 1 | passable |
 | Water + `has_bridge` | 2 | 3 | 1 | passable |
-| Wetlands + `has_canal` | — | — | 2 | passable |
+| Wetlands + `has_canal` | 2 | 4 | **2** | passable |
 
-*Naval cannot enter Wetlands without `has_canal`. Canals cost significant manpower to dig. Supply units are the builders for remote construction.
+Canals (`has_canal`) allow naval units to traverse Wetlands hexes. They have no effect on land movement. Naval cannot enter Wetlands without a canal.
+
+**Mountains and mechanized:** Vehicles cannot enter Mountains without a road. Supply trucks build roads in **adjacent** hexes without entering them — park at the mountain's edge and construct the path forward. Infantry can screen the supply truck while it works.
 
 **Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it. Roads reduce movement cost to **2/3 of normal terrain cost** (integer math via ×3 scale: road cost = terrain_cost × 2 in the internal scale).
 
