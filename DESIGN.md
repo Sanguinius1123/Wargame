@@ -221,6 +221,10 @@ Roads connect visually: adjacent road tiles draw a road line between them, inclu
 
 Transport ships (naval + ground) offload ground units to adjacent land hexes. Ground units enter the land hex at cost 1 movement. Transport capacity: **6 slots**. Each unit currently occupies 1 slot (subject to change; some units may occupy 2).
 
+**If a Transport sinks while carrying ground units:**
+- If the Transport is NOT adjacent to a land hex: all aboard are destroyed.
+- If the Transport IS adjacent to a land hex: each ground unit rolls 1d6 — result ≥ 4 → makes it ashore (placed on the adjacent land hex); fail → drowned and destroyed.
+
 ### Air Movement
 
 Air units ignore terrain costs. Must start and end every turn on a hex with `has_airstrip` or `has_airbase`. Air units provide LOS for every hex along their flight path. Destroyed units contribute no LOS.
@@ -321,31 +325,33 @@ Applied to the detecting unit's effective detection:
 
 ### Detection Formula
 
+Uses the same roll-under direction as combat. Higher detection stat = better detector; higher stealth stat = harder to find.
+
 ```
 effective_stealth    = unit.stealth_rating + terrain_stealth_modifier
 effective_detection  = detector.detection + domain_modifier
-threshold            = 7 + distance + effective_stealth − effective_detection
+detection_score      = 7 + effective_detection − effective_stealth − distance
 ```
 
-Roll **2d6 ≥ threshold** → detected this turn. Capped: threshold < 2 = auto-detect, threshold > 12 = impossible. Detection is attempted each turn within the detector's detection range.
+Roll **2d6 ≤ detection_score** → detected this turn. Capped: detection_score > 12 = auto-detect, detection_score < 2 = impossible. Detection is attempted each turn within the detector's detection range.
 
 Once detected, the unit is visible to that faction. The roll re-runs each turn — a faction can lose track of a unit if the detector moves away or is destroyed.
 
 **Example — Destroyer (detection 6) vs Submarine (stealth 6):**
 
-| Distance | Threshold | Chance |
+| Distance | Detection score | Chance |
 |---|---|---|
-| 1 | 8 | 42% |
-| 2 | 9 | 28% |
-| 3 | 10 | 17% |
-| 4 | 11 | 8% |
-| 5 | 12 | 3% |
+| 1 | 6 | 42% |
+| 2 | 5 | 28% |
+| 3 | 4 | 17% |
+| 4 | 3 | 8% |
+| 5 | 2 | 3% |
 
 ### Submarine Rules
 
 - LOS = 0. Completely blind visually.
 - Detects via sonar (detection stat) only.
-- Can only detect naval surface units — not ground, not air.
+- Can only detect naval surface units — not ground, not air. Air units cannot detect or attack submarines either.
 - Contributes no fog-of-war vision to its faction beyond its own hex.
 
 ### Stealth by Unit Type
@@ -411,11 +417,32 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 ## Patrol
 
-Standing order for fighters. Fighter stays in designated hex; intercepts any enemy flight group whose path enters patrol area.
+Standing order for units. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
 
-**Patrol area:** all hexes within X of the patrol hex (range TBD, 1–2, pending balance).
+**Patrol radius by unit type:**
 
-Patrol persists turn to turn. Patrolling fighter cannot also move. Undetected stealth flight groups pass through without triggering intercept.
+| Unit type | Patrol radius |
+|---|---|
+| Foot (Infantry, Artillery, AA Gun, Supply) | 1 — adjacent hexes only |
+| Mechanized (Armor) | 2 |
+| Naval | 2 |
+| Air (Fighter, Scout Plane) | See formula below |
+
+**Air patrol radius formula:**
+```
+patrol_radius = floor((movement − 2 × distance_to_patrol_center) / 6)
+```
+`distance_to_patrol_center` = hexes from the unit's home airbase to the designated patrol center hex.
+
+- Fighter (move 30) patrolling its own airbase (distance 0): radius = floor(30 / 6) = **5 hexes**
+- Fighter sent 6 hexes out: radius = floor((30 − 12) / 6) = **3 hexes**
+- Fighter sent 12 hexes out: radius = floor((30 − 24) / 6) = **1 hex**
+- Fighter sent 15 hexes out: radius = **0** (only intercepts groups passing through the patrol center itself)
+- If `2 × distance > movement` → cannot assign patrol there (can't get there and back)
+
+**UI:** when a player designates a patrol center, the map highlights the patrol center and the computed patrol radius so the player sees exactly what will be covered before confirming the order.
+
+Patrol persists turn to turn until cancelled. A patrolling unit cannot also move that turn. Undetected stealth flight groups pass through without triggering intercept.
 
 **Patrol engages every group** — each detected flight group that enters the patrol area triggers a separate intercept combat. Casualties from each engagement apply immediately before the next group is engaged. This means sending a fighter group first to attrit the defending patrol, then following with bombers, is a valid tactic.
 
@@ -424,7 +451,7 @@ Patrol persists turn to turn. Patrolling fighter cannot also move. Undetected st
 ## Air Phase Resolution (Phase 1 Detail)
 
 1. All flight groups commit to paths simultaneously
-2. **AA Overwatch fires** — max 3 flight groups per AA unit per turn (cap resets each turn). Multiple AA units fire independently. AA must detect the group first (stealth groups require a roll).
+2. **AA Overwatch fires** — each AA fires at every detected flight group passing through its overwatch zone. Multiple AA units fire independently. AA must detect the group first (stealth groups require a roll).
 3. **Patrol intercepts** — engage each group whose path crossed the patrol area. Multiple patrol zones = multiple separate intercept combats. Stealth groups that aren't detected pass through.
 4. **Surviving bombers** carry strike orders into Phase 3
 
@@ -455,11 +482,14 @@ AA fires before patrol intercepts.
 | Attacker | Can target | Phase |
 |---|---|---|
 | foot / mechanized | ground only | 3 |
-| naval | naval only | 2 |
+| naval (surface) | naval (surface) only | 2 |
+| submarine | naval (surface) only | 2 |
 | air fighter | air (intercept) | 1 |
-| air bomber | ground + naval (strike) | 3 |
+| air bomber | ground + naval surface (strike) | 3 |
 | AA Gun (ground) | ground only | 3 |
 | AA Gun (Overwatch Skies) | air only | 1 |
+
+**Submarine / air domain separation:** air units cannot detect or attack submarines; submarines cannot detect or attack air units. These two domains are completely blind to each other.
 
 **Stealth rule:** units that have not been detected cannot be targeted by any attack.
 
@@ -573,10 +603,10 @@ Air:
 
 | Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 2 | 2 |
-| Scout Plane | — | — | 6 | 0 | — | 10 | 6 | — | 3 | 1 | 2 |
-| Bomber | 8 | 4 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 2 | 3 |
-| Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 | 2 |
+| Fighter | 7 | — | 7 | 0 | — | 30 | 5 | 1 | 4 | 2 | 2 |
+| Scout Plane | — | — | 6 | 0 | — | 35 | 6 | — | 3 | 1 | 2 |
+| Bomber | 8 | 4 | 6 | 0 | 3 | 40 | 5 | 1 | 5 | 2 | 3 |
+| Transport Plane | — | — | 3 | 0 | — | 25 | 3 | — | 3 | 1 | 2 |
 
 `Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (4 = ~17% hit rate, rarely kills).
 
@@ -609,7 +639,11 @@ After escort vs patrol resolves, surviving patrol fighters engage bombers. Bombe
 
 ### Movement and Combat Interaction
 
-**Crossing detection:** A → B's origin, B → A's origin simultaneously → border battle. Neither moves. Combat in starting hexes. Survivors may advance.
+**Crossing detection:** A → B's origin, B → A's origin simultaneously → border battle. Combat resolves in each unit's starting hex. Survivors: if one side is wiped, the winning side advances into the hex they were originally heading toward. If both sides survive, each stays in their starting hex.
+
+**Multi-faction combat:** When three or more factions occupy or contest the same hex, each faction attacks all factions it is `at_war` with. Allied factions pool into a shared defender/attacker group against common enemies. Neutral factions do not fire but still receive fire from factions at war with them.
+
+**Bombardment is indiscriminate:** Unit-targeting rolls during bombardment (from artillery, battleships, or bombers) apply to ALL units in the hex — friendly, enemy, and allied. Players take responsibility for bombing hexes with mixed or friendly occupancy.
 
 Units that moved do NOT receive `defense_bonus`.
 
@@ -623,7 +657,7 @@ Bombardment is indirect fire — the target does not fire back. Resolves in Phas
 
 **Two rolls per targeted hex:**
 1. **vs Units** — one 2d6 roll per bombarder. Each roll ≤ bombarder's To-Hit → 1 hit. Each hit: select a unit to receive it **proportional to unit count** (a hex with 10 infantry and 2 armor has a 10/12 chance of hitting infantry). That unit makes a normal defense save. Failed save = 1 casualty or 1 HP damage as normal.
-2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≥ To-Hit → 1 infrastructure hit. **No defense roll for infrastructure.** Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road). If it has HP → loses 1 HP. If it has no HP (urban, vegetation, road) → immediately set to damaged, or destroyed if already damaged.
+2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≤ To-Hit → 1 infrastructure hit. **No defense roll for infrastructure.** Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road). If it has HP → loses 1 HP. If it has no HP (urban, vegetation, road) → immediately set to damaged, or destroyed if already damaged.
 
 Multiple bombarders targeting the **same hex** pool their rolls as a single simultaneous attack — hits are totalled before any are applied.
 
@@ -745,6 +779,10 @@ Manpower spent on construction is committed to the building and persists as HP p
 - Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
 - Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
 - Air units produced at a Manufacturing Facility with adjacent Airbase may spawn aboard a Carrier within adjacent range of that Airbase.
+
+**If the Carrier sinks (Phase 2):**
+- Air units mid-mission (launched in Phase 1): in Phase 4, they attempt to land at the nearest friendly airstrip or airbase within remaining movement. If none reachable → crash and destroyed.
+- Air units parked on the Carrier (no orders that turn): **emergency takeoff roll** — roll 1d6, result ≥ 4 → unit gets airborne and flies to nearest friendly landing site within movement. Fail → sunk with the Carrier.
 
 ---
 
