@@ -25,7 +25,7 @@ Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval
 
 **Phase 3 — Ground**
 - Ground units fight in contested hexes
-- Naval bombardment resolves (Battleship + Destroyer strikes against land targets)
+- Naval bombardment resolves (Battleship strikes against land targets)
 - Air-to-ground strikes resolve (surviving bombers from Phase 1)
 
 **Phase 4 — Collect**
@@ -365,9 +365,14 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 | Mission | Units | Effect |
 |---|---|---|
-| Strike | Bombers + optional escort | Bombers attack designated target in Phase 3 |
+| Bombing Run | Bombers + optional escort | Target specific infrastructure in designated hexes (3-hex line pattern). See Bombardment. |
+| Attack Run | Bombers + optional escort | Target first detected enemy unit in a designated hex. Works against any domain (ground or naval). No infrastructure roll. |
 | Scout | Fighters only | Fly path to gather LOS |
 | Sweep | Fighters only | Clear patrol fighters from a path |
+
+**Bombing Run** is for infrastructure destruction: 3-hex line, designated infra targets, both unit and infra rolls (see Bombardment section).
+
+**Attack Run** is for targeting mobile forces or ships: player designates a single target hex. Bombers fly there, detect enemy units using normal detection rules, and attack the first detected unit (1 die per bomber, To-Hit 7, Pen 1 vs units only — no infra roll). If nothing is detected in the target hex, the run is wasted. Bombers return to base.
 
 **Path validation:** system checks every unit has enough movement for outbound path + return to nearest friendly airstrip/airbase. Rejected if any unit falls short.
 
@@ -407,7 +412,8 @@ AA fires before patrol intercepts.
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
 | **Bombard** | Artillery, Battleship | Attack target hex at range. Artillery must be stationary. |
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
-| **Flight Group** | Fighter, Bomber | Compose group, designate path and mission. |
+| **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
+| **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
 | **Skirmish Hold** *(stub)* | ground | Reduced damage; no advance even if enemy wiped. |
 | **Skirmish Retreat** *(stub)* | ground | Fire then fall back to designated hex. |
 
@@ -449,16 +455,28 @@ Combat against naval units produces HP damage rather than quantity casualties. N
 
 ### AA Gun — Overwatch Skies
 
-| Mode | Trigger | Attack | Pen | Range |
-|---|---|---|---|---|
-| Ground combat | Phase 3 | 2 | 1 | 1 |
-| Overwatch Skies | Phase 1, detected air in range | 4 | 0 | 2 |
+AA Guns have one set of base stats (stored in unit_type_config) used for ground combat. They fire at air units using a separate **overwatch_to_hit** and **overwatch_pen** stat.
+
+| Mode | Trigger | To-Hit | Pen | Range | Cap |
+|---|---|---|---|---|---|
+| Ground combat (Phase 3) | Enemy ground in hex | 9 | 1 | 1 | — |
+| Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 4 | 0 | 2 | 3 groups/turn |
+
+Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range 2 triggers AA fire automatically, up to 3 groups per AA unit per turn. Cap resets each turn.
 
 ### Terrain in Combat
 
-1. **`combat_modifier`** — applies to all units fighting FROM that hex (both attacker and defender).
-2. **`defense_bonus`** — only for units that did not move this turn. Stacks terrain + `has_urban`.
-3. **Vegetation** — `has_light_vegetation` and `has_heavy_vegetation` give minor defense modifier for stationary defenders (they're entrenched in cover).
+**`combat_modifier`** — applies to To-Hit rolls for all units fighting FROM that hex.
+
+**Defense bonuses** — added to effective defense in the save formula: `save_threshold = 14 − (defense + defense_bonus) + penetration`
+
+| Source | Bonus | Applies to | Condition |
+|---|---|---|---|
+| Higher elevation than attacker | +1 | Ground vs ground only | Unit did not move this turn |
+| `has_light_vegetation` | +1 | All attacks including bombardment | Unit did not move this turn |
+| `has_heavy_vegetation` | +2 | All attacks including bombardment | Unit did not move this turn |
+
+Elevation bonus does **not** apply against air attacks or bombardment/bombing runs. Vegetation bonuses **do** apply against bombardment. Units that moved this turn receive no defense bonuses.
 
 ### Combat Formula (Simultaneous Volleys)
 
@@ -471,10 +489,11 @@ Roll 2d6 ≥ To-Hit → 1 hit
 
 **Save roll — defender rolls once per hit received:**
 ```
-save_threshold = 14 − defense + penetration
+save_threshold = 14 − (defense + defense_bonus) + penetration
 Roll 2d6 ≥ save_threshold → saved
 otherwise → 1 casualty (ground) or 1 HP damage (naval)
 ```
+`defense_bonus` = sum of applicable terrain bonuses (see Terrain in Combat).
 
 If `defense − penetration < 2` → save_threshold > 12 → impossible to save (all hits deal casualties).
 
@@ -529,7 +548,11 @@ Air:
 | Bomber | 6 | 10 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 1 |
 | Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 |
 
-`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills). Bombers use HP (3 per aircraft) rather than quantity stacks — repaired at Airbase.
+`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills).
+
+**Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = floor(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
+
+**Artillery in direct combat** — artillery has 0 attack dice when enemies enter its hex. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
 
 Naval (HP-based; attack dice per ship):
 
@@ -603,7 +626,12 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 
 ## Fog of War
 
-Three states: **Visible** / **Scouted** / **Dark**.
+Two display states: **Visible** / **Dark**.
+
+- **Visible** — hex is in current LOS. Full information: terrain, attributes, all detected units.
+- **Dark** — hex is not in current LOS. If the faction has ever had LOS to this hex, terrain and infrastructure attributes are shown (you know the lay of the land). **No unit information** — you see where units were the last time you had LOS, but those markers are not shown; only terrain persists. If never seen, the hex renders as unknown.
+
+"Scouted" is an internal database concept (`scouted_hexes` table) tracking whether a faction has ever seen a hex — used to determine whether to show terrain info on Dark hexes. It is not a separate display state.
 
 LOS blocked by Mountains, `has_light_vegetation`, `has_heavy_vegetation`. Blocking hex is visible; hexes beyond are not.
 
@@ -643,12 +671,20 @@ Manpower spent on construction is committed to the building and persists as HP p
 
 ## Production
 
-**Unit production:**
-- Ground units: at Manufacturing Facility
-- Air units: at Manufacturing Facility with adjacent Airbase → spawned at Airbase (or Carrier within adjacent range)
-- Naval units: at Manufacturing Facility with adjacent Harbor → spawned at Harbor
+**Production panel** — shown at the **start of each turn**, before orders are set:
+1. **Place completed units** — units whose production was queued last turn are ready. Player chooses spawn location at the relevant facility (Manufacturing Facility for ground, Airbase for air, Harbor for naval).
+2. **Queue new production** — player selects unit types to produce this turn. Materials are deducted immediately from stockpile. Manpower is reserved from this turn's Phase 4 collection.
 
-`production_queue`: game, faction, target hex, unit type, quantity, turn queued, status.
+**Production time:** always 1 turn. Pay resources turn N → place unit at start of turn N+1.
+
+**Spawn rules:**
+- Ground units: spawn at Manufacturing Facility
+- Air units: spawn at adjacent Airbase (or a Carrier within adjacent range)
+- Naval units: spawn at adjacent Harbor
+
+**Resource payment:** Materials deducted from stockpile immediately. Manpower reserved from this turn's collection (Phase 4). If a settlement is captured or destroyed before Phase 4 and manpower falls short, production is cancelled (materials refunded).
+
+`production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
 
 ---
 
@@ -659,6 +695,14 @@ Manpower spent on construction is committed to the building and persists as HP p
 - Moves ground units from an Airbase to any Airbase or Airstrip
 - Units must **board at an Airbase** (Airstrips cannot load troops — receive only)
 - One transport mission per turn (like a flight group)
+
+## Carrier
+
+- Tags: naval + air
+- Air unit capacity: **4 fighters maximum**. Cannot carry bombers.
+- Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
+- Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
+- Air units produced at a Manufacturing Facility with adjacent Airbase may spawn aboard a Carrier within adjacent range of that Airbase.
 
 ---
 
@@ -711,6 +755,4 @@ Collapsible sidebar: units needing orders, idle facilities.
 - **Victory condition tuning** — per player count, alternative win types
 - **Skirmish orders** — Hold and Retreat sub-modes
 - **Subterranean, hover, orbital, space** locomotion tags
-- **Naval repair** — at Harbors, cost = ceil(build_cost / 4) → full HP restore
-- **Canal building** — Supply unit digs canal through Wetlands hex (10 manpower, supply truck present not consumed)
 - **Map visual clarity** — terrain types, buildings, roads, bridges, settlements, units in LOS must all be immediately readable at a glance. Drive hex rendering with distinct colors, icons, and overlays per attribute.
