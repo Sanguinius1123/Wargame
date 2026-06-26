@@ -462,56 +462,90 @@ Combat against naval units produces HP damage rather than quantity casualties. N
 
 ### Combat Formula (Simultaneous Volleys)
 
+**Attack roll — each unit rolls once:**
 ```
-roll       = d6 + d6
-multiplier = roll / 7
-raw_hits   = floor((attack + combat_modifier) × qty × multiplier)
-```
-
-Per hit, target saves:
-
-```
-save_threshold = 11 − target.defense − defense_bonus(if_stationary) + attacker.penetration
+Roll 2d6 ≥ effectiveness → 1 hit
 ```
 
-2d6 ≥ threshold → hit negated. Below → 1 casualty. Applied weakest-unit-first. Both sides fire before casualties removed.
+**Save roll — defender rolls once per hit received:**
+```
+Roll 2d6 ≤ (defense − penetration) → saved
+otherwise → 1 casualty (ground) or 1 HP damage (naval)
+```
+
+If `defense − penetration < 2` → impossible to save (all hits deal casualties).
+
+Both sides roll simultaneously. Casualties and HP damage are removed after both volleys fully resolve.
+
+**Probability reference:**
+
+| Roll ≤ n (save) | Save % | Roll ≥ n (hit) | Hit % |
+|---|---|---|---|
+| ≤ 4 | 17% | ≥ 4 | 83% |
+| ≤ 5 | 28% | ≥ 5 | 72% |
+| ≤ 6 | 42% | ≥ 6 | 58% |
+| ≤ 7 | 58% | ≥ 7 | 42% |
+| ≤ 8 | 72% | ≥ 8 | 28% |
+| ≤ 9 | 83% | ≥ 9 | 17% |
+| ≤ 10 | 92% | ≥ 10 | 8% |
+
+### Target Allocation (Proportional Fire)
+
+Each attacking unit type spreads its shots proportionally across all defending unit types by count. Applies universally — mixed stacks, multi-faction, all cases.
+
+```
+shots_at_type_B = A_qty × (B_qty / total_enemy_qty)
+```
+
+Use largest-remainder rounding so totals add up exactly. Example: 10 infantry + 5 tanks attack 10 infantry + 5 tanks:
+- Attacking infantry (10 shots): 10×(10/15)=6.67→**7** at infantry, 10×(5/15)=3.33→**3** at tanks
+- Attacking tanks (5 shots): 5×(10/15)=3.33→**3** at infantry, 5×(5/15)=1.67→**2** at tanks
 
 ### Unit Combat Stats
 
-| Unit | Attack | Def Atk | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|---|
-| Infantry | 2 | 0 | 2 | 0 | 2 | 3 | 1 | 1 | 2 |
-| Armor | 4 | 0 | 4 | 3 | 4 | 3 | 1 | 3 | 1 |
-| Artillery | 5 | 0 | 1 | 1 | 2 | 3 | 4 | 4 | 1 |
-| AA Gun | 2 | 0 | 1 | 1 | 1 | 3 | 1 | 2 | 1 |
-| Supply | 0 | 0 | 0 | 0 | 4 | 3 | 1 | 2 | 1 |
-| Fighter | 3 | 0 | 0 | 0 | 8 | 5 | 1 | 4 | 1 |
-| Scout Plane | 1 | 0 | 0 | 0 | 10 | 6 | 1 | 3 | 1 |
-| Bomber | 6 | 1 | 0 | 0 | 7 | 5 | 1 | 5 | 1 |
-| Transport Plane | 0 | 0 | 0 | 0 | 6 | 3 | 1 | 3 | 1 |
-| Destroyer | 3 | 0 | 2 | 1 | 5 | 4 | 1 | 3 | 1 |
-| Cruiser | 4 | 0 | 3 | 1 | 3 | 4 | 2 | 4 | 1 |
-| Battleship | 6 | 0 | 4 | 2 | 4 | 4 | 3 | 6 | 2 |
-| Transport (ship) | 0 | 0 | 1 | 0 | 4 | 4 | 1 | 2 | 1 |
-| Carrier | 2 | 0 | 2 | 0 | 3 | 5 | 1 | 5 | 2 |
-| Submarine | 4 | 0 | 3 | 2 | 4 | 0 | 1 | 4 | 1 |
+Ground:
 
-`Def Atk` = defensive attack value (bombers only; used against intercepting fighters).
+| Unit | Eff | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|
+| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 2 |
+| Armor | 6 | 10 | 3 | 4 | 3 | 1 | 3 | 1 |
+| Artillery | 6 | 4 | 2 | 2 | 3 | 4 | 4 | 1 |
+| AA Gun | 9 | 4 | 1 | 1 | 3 | 1 | 2 | 1 |
+| Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 |
+
+Air (defense=0 — saves impossible, every hit kills):
+
+| Unit | Eff | Def Eff | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|
+| Fighter | 7 | — | 8 | 5 | 1 | 4 | 1 |
+| Scout Plane | — | — | 10 | 6 | — | 3 | 1 |
+| Bomber | 6 | 10 | 7 | 5 | 1 | 5 | 1 |
+| Transport Plane | — | — | 6 | 3 | — | 3 | 1 |
+
+`Def Eff` = effectiveness of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rare).
+
+Naval (HP-based; attack dice per ship):
+
+| Unit | Atk dice | Eff | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 |
+| Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 1 |
+| Battleship | 3 | 6 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 2 |
+| Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 |
+| Carrier | 1 | 8 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 |
+| Submarine | 2 | 6 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 1 |
+
 All stats are starting values — tunable.
 
 ### Air Intercept Combat
 
-| Matchup | One side | Other side |
+| Matchup | Attacker roll | Defender roll |
 |---|---|---|
-| Fighter vs Fighter | `attack` | `attack` |
-| Fighter vs Bombers (no escort) | `attack` | `def_attack` only |
-| Escort vs Patrol Fighters | `attack` | `attack` |
+| Fighter vs Fighter | eff 7 | eff 7 |
+| Fighter vs Bombers (no escort) | eff 7 | def_eff 10 (tail gun only) |
+| Escort vs Patrol Fighters | eff 7 | eff 7 |
 
 After escort vs patrol resolves, surviving patrol fighters engage bombers. Bombers surviving any intercept continue to target.
-
-### Multi-Faction Combat
-
-3+ factions: proportional fire. Each faction splits attack across all enemies by enemy quantity. All fire simultaneously.
 
 ### Movement and Combat Interaction
 
