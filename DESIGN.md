@@ -167,20 +167,19 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 *Naval cannot enter Wetlands without `has_canal`. Canals cost significant manpower to dig. Supply units are the builders for remote construction.
 
-**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it (not destroyed by combat). Roads **halve movement cost** (minimum 0.5 MP). For integer tracking, 2 road hexes cost 1 MP — units accumulate half-points.
+**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it (not destroyed by combat). Roads reduce movement cost to **2/3 of normal terrain cost**.
 
-| Terrain | Normal cost | On road |
-|---|---|---|
-| Plains | 1 | 0.5 (2 hexes/MP) |
-| Hills | 2 | 1 |
-| Mountains (foot) | 2 | 1 |
-| Mountains (mech) | 4 | 2 |
-| Desert (foot) | 2 | 1 |
-| Desert (mech) | 1 | 0.5 (2 hexes/MP) |
+Implementation: use a 3× internal movement scale. All unit movement stats are stored ×3. Road hexes cost `terrain_cost × 2`; off-road hexes cost `terrain_cost × 3`. Integer math throughout.
 
-Roads create real strategic mobility everywhere — Infantry on a plains road covers 4 hexes instead of 2. Roads connect visually: adjacent road tiles draw a road line between them, including across bridges.
+| Terrain | Normal | On road | Infantry result | Armor result |
+|---|---|---|---|---|
+| Plains | 1 | 0.67 | 3 hexes (vs 2) | 6 hexes (vs 4) |
+| Hills | 2 | 1.33 | 1 hex | 3 hexes (vs 2) |
+| Mountains (foot) | 2 | 1.33 | 1 hex | — |
+| Mountains (mech) | 4 | 2.67 | — | 1 hex |
+| Desert (mech) | 1 | 0.67 | — | 6 hexes (vs 4) |
 
-Naval and air are unaffected by roads.
+Roads connect visually: adjacent road tiles draw a road line between them, including across bridges. Naval and air are unaffected.
 
 **Desert asymmetry:** foot pays 2 (heat, exhausting); mechanized pays 1 (flat open terrain, ideal for armor).
 
@@ -209,28 +208,27 @@ Air units ignore terrain costs. Must start and end every turn on a hex with `has
 
 Buildings are placed on the map (either by GM at start or built by players during the game). They have HP, can be damaged or destroyed.
 
-| Building | HP | Materials | Manpower | Supply unit? | Placement rules |
+| Building | Max HP | Mat cost | Man cost | Supply unit? | Placement rules |
 |---|---|---|---|---|---|
-| Manufacturing Facility | 8 | 20 | 20 | No | Pre-placed at settlements; player-buildable elsewhere |
-| Airbase | 6 | 10 | 10 | No | Must be adjacent to a Manufacturing Facility |
-| Harbor | 6 | 10 | 10 | No | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
-| Airstrip | 4 | 0 | 2 | Consumed | Anywhere |
-| Bridge | 3 | 0 | 2 | Consumed | On a Water hex |
-| Road | — | 0 | 1 | Present (not consumed) | Any passable land hex |
+| Manufacturing Facility | 20 | 20 | 20 | No | Pre-placed at settlements; player-buildable elsewhere |
+| Airbase | 10 | 10 | 10 | No | Must be adjacent to a Manufacturing Facility |
+| Harbor | 10 | 10 | 10 | No | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
+| Airstrip | 4 | 0 | 2 total | Consumed | Anywhere |
+| Bridge | 3 | 0 | 2 total | Consumed | On a Water hex |
+| Road | — | 0 | 1 | Present, not consumed | Any passable land hex |
+
+HP = material cost for mat-based buildings. This makes all math trivial: **1 material + 1 manpower adds 1 HP of construction progress**.
+
+**Construction:** Players allocate materials and manpower toward a building each turn. Each 1 mat + 1 man invested adds 1 HP. The building is not operational until it reaches max HP. Players can invest as little or as much as their budget allows per turn — a Manufacturing Facility can be half-built (10 HP) over one turn and completed the next. Enemies can attack under-construction buildings to damage or destroy them. If HP drops to 0: building is lost, no refund.
 
 **Repair costs:**
 ```
-Naval (at Harbor):    cost = ceil(build_cost / 4)  → restores to full HP
+Naval (at Harbor):    ceil(build_cost / 4)  → restores to full HP
 
-Building (per resource type):
-    cost = ceil(build_cost_for_resource × hp_missing / (2 × max_hp))
-    Always round up. Player chooses how much HP to restore.
+Mat-based buildings:  1 mat + 1 man per HP restored (same rate as construction)
+
+Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 ```
-
-Example: Manufacturing Facility (20 materials, 8 HP max), damaged to 1 HP (7 HP missing):
-- Materials: ceil(20 × 7 / 16) = ceil(8.75) = 9 materials to fully repair
-
-**Construction:** Buildings are queued and paid for upfront. They begin at 0 HP and gain **1 HP per turn** automatically. Not operational until max HP is reached. Enemies can attack under-construction buildings to slow or destroy them. If destroyed before completion (HP = 0): building is lost, no refund.
 
 **Building status field:** `under_construction` → `operational` → `damaged` → `destroyed`
 - `under_construction`: current_hp < max_hp, never yet reached full HP. No production.
