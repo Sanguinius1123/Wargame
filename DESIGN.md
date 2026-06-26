@@ -14,29 +14,78 @@ Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval
 
 ## Turn Resolution
 
-**Phase 1 — Air**
-1. All flight groups move along designated paths (paths recorded for LOS + intercept)
-2. AA Overwatch fires at each flight group passing through coverage zones
-3. Patrol intercepts engage each flight group passing through patrol areas
-4. Surviving bombers carry strike orders into Phase 3
+All phases resolve automatically when all players click Finish Turn (or GM force-advances). Each phase is fully simultaneous — all unit actions within a phase happen at once, not in sequence. Casualties and state changes within a phase are applied after all volleys in that phase complete.
 
-**Phase 2 — Naval**
-- Naval units fight each other in contested hexes
+---
 
-**Phase 3 — Ground**
-- Ground units fight in contested hexes
-- Naval bombardment resolves (Battleship strikes against land targets)
-- Air-to-ground strikes resolve (surviving bombers from Phase 1)
+### Phase 1 — Air
 
-**Phase 4 — Return and Collect**
-- All air units fly home and land (fighters, bombers, scouts return to nearest friendly airstrip/airbase or carrier at its current position)
-- Air units that cannot reach any friendly landing site crash
-- Manpower calculated from current owned settlements (flood-fill)
-- Materials collected from owned resource tiles
-- Production queue advances: `pending` → `ready` (units available to place next turn)
-- Manpower spent on queued production and building construction; remainder wasted
-- `turn_ready` reset for all players, turn counter increments
-- **Win condition check** — if any faction holds ≥ 2/3 of `has_settlement` hexes, they win
+1. **All flight groups commit.** Players' designated paths and mission types are locked. Patrol orders already standing from previous turns remain active.
+2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: identify every detected enemy flight group whose path passes within overwatch range this turn. Each AA unit rolls once per flight group. Stealth groups require a detection roll before AA can engage — undetected groups pass through silently. Multiple AA units fire independently; a flight group can take fire from several AA units along its path.
+3. **Patrol intercepts.** For each patrolling fighter/scout unit: identify every detected enemy flight group entering the patrol area. Intercept combat sequence per group:
+   a. Escort fighters vs patrol fighters (simultaneous fire, casualties applied)
+   b. Surviving patrol fighters engage bombers (one more volley)
+   c. Surviving bombers continue toward target
+   Multiple patrol zones = multiple separate intercept combats in path order.
+4. **Casualties from Phase 1 applied.** AA hits and intercept casualties are resolved; destroyed aircraft are removed.
+5. **Surviving bombers note targets** for execution in Phase 3.
+
+---
+
+### Phase 2 — Naval
+
+1. **All naval units execute movement orders simultaneously.** Ships travel to their final destination hexes. Units do not fight in intermediate hexes — only at final positions.
+2. **Detection rolls.** Destroyers and surface ships attempt to detect submarines within sonar range. Submarines attempt to detect surface ships. Detection_score computed; rolls made. Undetected units cannot be targeted this phase.
+3. **Contested naval hexes identified.** Any hex containing ships from factions at war → combat triggers.
+4. **Naval combat resolves.** All contested naval hexes fight simultaneously. Both sides roll simultaneously; HP damage applied after all volleys. Submarines that were detected can participate.
+5. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
+6. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
+
+---
+
+### Phase 3 — Ground
+
+1. **All ground units execute movement orders simultaneously.**
+   - Supply trucks on build orders (road, canal, airstrip, bridge) do not move — they execute their build action in place.
+   - Transport planes execute cargo delivery missions.
+2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
+3. **All combat and bombardment resolves simultaneously** — every action in Phase 3 fires at the same moment:
+   - **Direct ground combat:** units in contested hexes fight.
+   - **Artillery bombardment:** all stationary artillery fire at designated target hexes.
+   - **Naval bombardment:** all validated Battleship bombard orders fire at designated land hexes.
+   - **Air-to-ground strikes:** surviving bombers from Phase 1 execute Bombing Run or Attack Run orders.
+   - All hits from all sources are pooled; casualties and HP damage are applied after every volley completes.
+4. **Bombardment is indiscriminate.** Unit-targeting rolls hit all units in the target hex — friendly, enemy, and allied alike.
+5. **Building and infrastructure damage assessed.** Infra hits from bombardment applied: HP buildings lose HP, no-HP infra flagged damaged/destroyed.
+6. **Hex capture.** Any hex where exactly one faction's ground units remain → that faction captures the hex. Hex ownership updated. Buildings and infrastructure transfer to new owner in current state.
+
+---
+
+### Phase 4 — Return and Collect
+
+1. **Air units fly home.** All flight groups return to nearest friendly landing site (airbase, airstrip, carrier at its current position after Phase 2 movement).
+   - If planned landing site was captured or destroyed: reroute to nearest alternative within remaining movement range.
+   - Carrier-based units whose carrier sunk: find alternative landing site or crash.
+   - Units with no reachable friendly landing site → crash and are destroyed.
+2. **Manpower calculated.** Flood-fill from each owned `has_settlement` hex through contiguous `has_urban` tiles. Total = this turn's manpower budget. Damaged urban tiles produce nothing.
+3. **Materials collected.** +1 per owned resource tile.
+4. **Manpower allocated** (player specified this at order-setting time; system now deducts):
+   - Building construction progress: HP added to all buildings with committed construction this turn.
+   - Production reservations honored: manpower deducted for queued units. If actual manpower falls short of all reservations (e.g. a settlement was captured this turn), production orders are cancelled and materials refunded.
+   - Road/canal construction: manpower deducted for supply truck build actions that completed in Phase 3. Shortfall = construction not completed, truck action wasted (no partial roads).
+   - Unused manpower → wasted.
+5. **Buildings that reached max HP** transition from `under_construction` to `operational`.
+6. **Production queue advances.** All `pending` orders → `ready`. Units will be available to place at the next production panel.
+7. **Win condition check.** Count `has_settlement` hexes per faction. Any faction holding ≥ 2/3 of all settlements → wins.
+8. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
+
+---
+
+**Between turns (player portal):**
+1. Players review combat reports and battle log filtered through their fog of war.
+2. **Production panel** — place all `ready` units at their spawn locations (Manufacturing Facility for ground, Airbase for air, Harbor for naval). Queue new production and pay materials immediately from stockpile.
+3. Set orders for the new turn (movement, bombardment, flight groups, patrol, build orders, etc.).
+4. Click Finish Turn when ready.
 
 ---
 
@@ -151,6 +200,7 @@ Units have a combination of tags that describe what they are, what they can do, 
 | Bomber | air + heavy |
 | Transport Plane | air + ground |
 | Destroyer | naval + mobile |
+| Frigate | naval + air |
 | Cruiser | naval |
 | Battleship | naval + armored + heavy |
 | Transport (ship) | naval + ground |
@@ -368,6 +418,7 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 | Bomber | 0 | 2 | |
 | Transport Plane | 0 | 1 | |
 | Destroyer | 0 | 6 | Primary sub-hunter |
+| Frigate | 0 | 5 | Specialized radar for detecting aircraft |
 | Cruiser | 0 | 4 | |
 | Battleship | 0 | 3 | |
 | Transport (ship) | 0 | 2 | |
@@ -486,8 +537,13 @@ AA fires before patrol intercepts.
 | submarine | naval (surface) only | 2 |
 | air fighter | air (intercept) | 1 |
 | air bomber | ground + naval surface (strike) | 3 |
-| AA Gun (ground) | ground only | 3 |
+| AA Gun (ground combat) | ground only | 3 |
 | AA Gun (Overwatch Skies) | air only | 1 |
+| Frigate (surface combat) | naval (surface) only | 2 |
+| Frigate (Overwatch Skies) | air only | 1 |
+| Battleship (surface combat) | naval (surface) only | 2 |
+| Battleship (Overwatch Skies) | air only | 1 |
+| Battleship (Bombard) | ground + naval surface | 3 |
 
 **Submarine / air domain separation:** air units cannot detect or attack submarines; submarines cannot detect or attack air units. These two domains are completely blind to each other.
 
@@ -504,6 +560,7 @@ Naval units (Destroyer, Cruiser, Battleship, Transport, Carrier, Submarine) use 
 | Unit | HP |
 |---|---|
 | Destroyer | 6 |
+| Frigate | 7 |
 | Cruiser | 8 |
 | Battleship | 12 |
 | Transport (ship) | 5 |
@@ -514,14 +571,27 @@ Combat against naval units produces HP damage rather than quantity casualties. N
 
 ### AA Gun — Overwatch Skies
 
-AA Guns have base stats used for ground combat and separate overwatch stats (`overwatch_attack`, `overwatch_pen`) for firing at air units.
+AA Guns have base stats used for ground combat and separate overwatch stats for firing at air units.
 
-| Mode | Trigger | Attack | Pen | Range |
+| Mode | Trigger | To-Hit | Pen | Range |
 |---|---|---|---|---|
 | Ground combat (Phase 3) | Enemy ground in hex | 5 | 1 | 1 |
 | Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 10 | 0 | 2 |
 
-Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range 2 triggers AA fire automatically. **AA fires once per flight group** — each group that enters the overwatch zone is engaged separately, regardless of how many groups pass through. This prevents players from using a sacrificial plane group to exhaust AA defenses before sending the main strike.
+Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range triggers AA fire automatically. **AA fires once per flight group** — each group that enters the overwatch zone is engaged separately. This prevents players from using a sacrificial plane group to exhaust AA defenses before sending the main strike.
+
+### Naval AA — Overwatch Skies
+
+Frigates and Battleships can fire at detected aircraft entering their overwatch zone. Same passive behavior as land AA — no order required, fires at every detected flight group.
+
+| Unit | Mode | To-Hit | Pen | Range | Notes |
+|---|---|---|---|---|---|
+| Frigate | Overwatch Skies (Phase 1) | 10 | 1 | 3 | Primary role — strong AA, wide coverage |
+| Battleship | Overwatch Skies (Phase 1) | 7 | 0 | 1 | Weak point defense only — adjacent hexes |
+
+The Frigate is the dedicated naval AA platform: higher pen than the land AA Gun, and wider range (3 vs 2). The Battleship's AA is incidental — its short range and low To-Hit make it a last-ditch defense, not a screening tool.
+
+Frigate detection stat = 5 (specialized radar). Stealth flight groups require a detection roll before the Frigate can fire at them.
 
 ### Terrain in Combat
 
@@ -619,11 +689,14 @@ Naval (HP-based; attack dice per ship):
 | Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 | 2 |
+| Frigate | 1 | 6 | 7 | 1 | 7 | 4 | 5 | 1 | 4 | 2 | 2 |
 | Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 2 | 2 |
 | Battleship | 3 | 8 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 3 | 3 |
 | Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 | 1 |
 | Carrier | 1 | 6 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 | 3 |
 | Submarine | 2 | 8 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 2 | 2 |
+
+**Frigate** — anti-air specialist. Mediocre surface combatant (To-Hit 6 = 42% vs ships); purpose is AA overwatch at sea. High LOS and detection for spotting incoming aircraft.
 
 All stats are placeholder values — balance tuning deferred until after test games.
 
