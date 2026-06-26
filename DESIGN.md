@@ -76,7 +76,7 @@ Resources are not produced by terrain type. They are produced by specific resour
 | `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. |
 | `has_urban` | City environment. Stealth +2. +1 move cost for mechanized. Contributes to manpower for connected settlement. |
 | `has_settlement` | Major urban center. Counts toward win condition. Starts with a Manufacturing Facility. |
-| `has_road` | Road. Ground units moving through this hex pay 1 movement cost regardless of terrain. Supply unit builds (1 manpower; truck not consumed). |
+| `has_road` | Road. Reduces terrain movement cost to 2/3 (see Movement section). Supply unit builds (1 manpower; truck not consumed). |
 | `has_railroad` | *(Stub)* Railroad. Very fast ground unit movement. Expensive to build. |
 | `has_airstrip` | Hosts air units. Cannot produce them. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_airbase` | Hosts and produces air units. Must be adjacent to a Manufacturing Facility. Has HP. |
@@ -154,11 +154,15 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 ### Terrain Costs by Tag
 
+Costs are stored internally on a **×3 scale** (all movement stats and terrain costs multiplied by 3) so that the 2/3 road multiplier resolves as integers. User-facing values below; engine values = user value × 3.
+
+**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder. This also ensures every unit can always move at least 1 hex per turn regardless of terrain cost.
+
 | Terrain | foot | mechanized | naval | air |
 |---|---|---|---|---|
 | Plains | 1 | 1 | impassable | passable |
 | Hills | 2 | 2 | impassable | passable |
-| Mountains | 2 | 4 | impassable | passable |
+| Mountains | **4** | **4** | impassable | passable |
 | Desert | 2 | 1 | impassable | passable |
 | Wetlands | 2 | 4 | impassable* | passable |
 | Water | impassable | impassable | 1 | passable |
@@ -167,17 +171,15 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 *Naval cannot enter Wetlands without `has_canal`. Canals cost significant manpower to dig. Supply units are the builders for remote construction.
 
-**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it (not destroyed by combat). Roads reduce movement cost to **2/3 of normal terrain cost**.
+**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it. Roads reduce movement cost to **2/3 of normal terrain cost** (integer math via ×3 scale: road cost = terrain_cost × 2 in the internal scale).
 
-Implementation: use a 3× internal movement scale. All unit movement stats are stored ×3. Road hexes cost `terrain_cost × 2`; off-road hexes cost `terrain_cost × 3`. Integer math throughout.
-
-| Terrain | Normal | On road | Infantry result | Armor result |
+| Terrain | Off-road | Road cost | Infantry (mv=2) off → road | Armor (mv=4) off → road |
 |---|---|---|---|---|
-| Plains | 1 | 0.67 | 3 hexes (vs 2) | 6 hexes (vs 4) |
-| Hills | 2 | 1.33 | 1 hex | 3 hexes (vs 2) |
-| Mountains (foot) | 2 | 1.33 | 1 hex | — |
-| Mountains (mech) | 4 | 2.67 | — | 1 hex |
-| Desert (mech) | 1 | 0.67 | — | 6 hexes (vs 4) |
+| Plains | 1 | 0.67 | 2 → 3 hexes | 4 → 6 hexes |
+| Hills | 2 | 1.33 | 1 → **2 hexes** | 2 → 3 hexes |
+| Mountains | 4 | 2.67 | 1 → **1 hex** | 1 → **2 hexes** |
+| Desert (foot/mech) | 2 / 1 | 1.33 / 0.67 | 1 → 1 hex | 4 → 6 hexes |
+| Wetlands | 2 / 4 | 1.33 / 2.67 | 1 → 1 hex | 1 → 1 hex |
 
 Roads connect visually: adjacent road tiles draw a road line between them, including across bridges. Naval and air are unaffected.
 
