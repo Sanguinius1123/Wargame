@@ -82,7 +82,7 @@ Resources are not produced by terrain type. They are produced by specific resour
 | `has_airbase` | Hosts and produces air units. Must be adjacent to a Manufacturing Facility. Has HP. |
 | `has_harbor` | Naval production and repair. Must be on/adjacent to a Water hex. Has HP. |
 | `has_bridge` | Foot/mechanized may cross this Water hex. Has HP. Built by consuming a Supply unit + 2 manpower. |
-| `has_canal` | Naval units may enter this Wetlands hex. Significant manpower cost to build. |
+| `has_canal` | Naval units may enter this Wetlands hex. Costs **10 manpower** to build. Supply unit present (not consumed). No effect on land movement. |
 | `is_damaged` | Building/infrastructure is damaged — reduced output. Still functional for movement (bridges still passable). |
 | `is_destroyed` | Building/infrastructure is destroyed — non-functional. Still visible on map. Repairable. |
 
@@ -559,10 +559,18 @@ Units that moved do NOT receive `defense_bonus`.
 
 ## Bombardment
 
-- Artillery: stationary, attacks at range, no return fire
-- Battleship: can move and bombard same turn; cancelled if engaged in naval combat
+**TODO: design needed next session.** Open questions:
+- How do artillery/naval bombard rolls work? Same To-Hit + save formula as direct combat, or different?
+- Does the target defend? Unoccupied hex = no save, wasted if empty?
+- Does bombardment deal casualties or just suppress?
+- Bombers dropping ordnance — same formula as artillery? Different payload mechanic?
+- Friendly fire risk for hexes with mixed units?
+
+Known so far:
+- Artillery: stationary to bombard (cannot move and fire same turn), no return fire from target
+- Battleship: can move and bombard same turn; cancelled if engaged in naval combat that turn
 - Empty target hex → wasted shot
-- Blind fire: no friendly LOS to target → player gets no report
+- Blind fire: no friendly LOS to target → player gets no combat report
 
 ---
 
@@ -678,5 +686,5 @@ Collapsible sidebar: units needing orders, idle facilities.
 - **Skirmish orders** — Hold and Retreat sub-modes
 - **Subterranean, hover, orbital, space** locomotion tags
 - **Naval repair** — at Harbors, cost = ceil(build_cost / 4) → full HP restore
-- **Canal building** — Supply unit digs canal through Wetlands hex (significant manpower cost)
+- **Canal building** — Supply unit digs canal through Wetlands hex (10 manpower, supply truck present not consumed)
 - **Map visual clarity** — terrain types, buildings, roads, bridges, settlements, units in LOS must all be immediately readable at a glance. Drive hex rendering with distinct colors, icons, and overlays per attribute.
