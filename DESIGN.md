@@ -175,15 +175,15 @@ Canals (`has_canal`) allow naval units to traverse Wetlands hexes. They have no 
 
 **Road construction rate:** Supply truck builds road segments in adjacent hexes. Each segment costs 1 manpower. Max segments buildable per turn depends on terrain of the hex being built into:
 
-| Target terrain | Max segments/turn |
-|---|---|
-| Plains | 3 |
-| Desert | 3 |
-| Hills | 2 |
-| Mountains | 1 |
-| Wetlands | 1 |
+| Target terrain | Max segments/turn | Manpower per segment |
+|---|---|---|
+| Plains | 3 | 1 |
+| Desert | 3 | 1 |
+| Hills | 2 | 2 |
+| Mountains | 1 | 3 |
+| Wetlands | 1 | 2 |
 
-The supply truck does not enter the hex it is building into. It can build up to its maximum in a single turn (e.g. 3 plains road segments at 3 manpower), or save the remainder for next turn.
+The supply truck does not enter the hex it is building into. It can build up to its maximum in a single turn (e.g. 3 plains road segments at 3 manpower total), or fewer if manpower is limited.
 
 **Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it. Roads reduce movement cost to **2/3 of normal terrain cost** (integer math via ×3 scale: road cost = terrain_cost × 2 in the internal scale).
 
