@@ -248,8 +248,9 @@ HP = material cost for mat-based buildings. This makes all math trivial: **1 mat
 
 **Repair costs:**
 ```
-Naval (at Harbor):    ceil(mat_cost / 4) materials + ceil(man_cost / 4) manpower → full HP, instant (1 turn)
-                      Uses a production slot at the Harbor.
+Naval (at Harbor):    ceil(mat_cost / 4) mat + ceil(man_cost / 4) man → full HP, 1 turn, uses 1 Harbor repair slot
+
+Air (at Airbase):     ceil(mat_cost / 4) mat + ceil(man_cost / 4) man → full HP, 1 turn, uses 1 Airbase repair slot
 
 Mat-based buildings:  1 mat + 1 man per HP restored (same rate as construction)
 
@@ -556,23 +557,25 @@ Use largest-remainder rounding so totals add up exactly. Example: 10 infantry + 
 
 **To-Hit** = roll 2d6 ≤ this value to score a hit. Higher = more accurate. Modified by terrain combat_modifier when fighting from elevated ground.
 
+Manpower cost = `floor(mat_cost / 2)`. All costs are placeholder values — balance tuning deferred until after test games.
+
 Ground:
 
-| Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man | Slots |
+| Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|
-| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 2 | 1 |
+| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 0 | 1 |
 | Armor | 8 | 9 | 3 | 4 | 3 | 1 | 3 | 1 | 2 |
-| Artillery | 8 | 4 | 2 | 2 | 3 | 4 | 4 | 1 | 2 |
+| Artillery | 8 | 4 | 2 | 2 | 3 | 4 | 4 | 2 | 2 |
 | AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
 
 Air:
 
-| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man | Slots |
+| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 1 | 2 |
+| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 2 | 2 |
 | Scout Plane | — | — | 6 | 0 | — | 10 | 6 | — | 3 | 1 | 2 |
-| Bomber | 8 | 4 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 1 | 3 |
+| Bomber | 8 | 4 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 2 | 3 |
 | Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 | 2 |
 
 `Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (4 = ~17% hit rate, rarely kills).
@@ -583,16 +586,16 @@ Air:
 
 Naval (HP-based; attack dice per ship):
 
-| Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man | Slots |
+| Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 | 2 |
-| Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 1 | 2 |
-| Battleship | 3 | 8 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 2 | 3 |
+| Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 2 | 2 |
+| Battleship | 3 | 8 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 3 | 3 |
 | Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 | 1 |
 | Carrier | 1 | 6 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 | 3 |
-| Submarine | 2 | 8 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 1 | 2 |
+| Submarine | 2 | 8 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 2 | 2 |
 
-All stats are starting values — tunable.
+All stats are placeholder values — balance tuning deferred until after test games.
 
 ### Air Intercept Combat
 
@@ -716,9 +719,14 @@ Manpower spent on construction is committed to the building and persists as HP p
 `production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
 
 **Production capacity:**
-- Facility slots per turn = `floor(current_hp / 2)`. Full Manufacturing Facility (20 HP) = 10 slots. A facility damaged to 10 HP = 5 slots. Destroyed = 0.
-- Each unit costs `ceil(mat_cost / 2)` slots to produce (Infantry = 1, Armor = 2, Battleship = 3, etc. — see Slots column in unit stats).
-- Harbor repair capacity = `floor(current_hp / 2)` repair slots. Each ship being repaired occupies 1 slot regardless of size. Full Harbor (10 HP) = 5 concurrent repairs.
+- All units produced at Manufacturing Facility. Slots per turn = `floor(current_hp / 2)`. Full facility (20 HP) = 10 slots. Damaged to 10 HP = 5 slots. Destroyed = 0.
+- Each unit costs `ceil(mat_cost / 2)` production slots (see Slots column in unit stats).
+- Manpower cost = `floor(mat_cost / 2)` per unit produced.
+
+**Repair capacity** (separate from production):
+- Harbor: `floor(current_hp / 2)` repair slots. Each naval unit being repaired occupies 1 slot. Full Harbor (10 HP) = 5 concurrent repairs.
+- Airbase: `floor(current_hp / 2)` repair slots. Each air unit being repaired occupies 1 slot. Full Airbase (10 HP) = 5 concurrent repairs.
+- Repair cost = `ceil(mat_cost / 4)` materials + `ceil(man_cost / 4)` manpower. Instant (1 turn). Restores to full HP.
 
 ---
 
