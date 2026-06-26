@@ -508,38 +508,37 @@ Overwatch is a **passive standing behavior** — no order required. Any detected
 
 ### Combat Formula (Simultaneous Volleys)
 
-Both rolls use the same direction: **roll 2d6 equal to or above your number to succeed.**
+Both rolls use the same direction: **roll 2d6 equal to or under your stat to succeed. Higher stats are always better.**
 
 **Attack roll — each unit rolls once:**
 ```
-Roll 2d6 ≥ To-Hit → 1 hit
+Roll 2d6 ≤ (To-Hit + combat_modifier) → 1 hit
 ```
+`combat_modifier` = terrain bonus for fighting FROM that hex (see Terrain in Combat). Higher To-Hit = more accurate.
 
 **Save roll — defender rolls once per hit received:**
 ```
-save_threshold = 14 − (defense + defense_bonus) + penetration
-Roll 2d6 ≥ save_threshold → saved
+Roll 2d6 ≤ (Defense + defense_bonus − Penetration) → saved
 otherwise → 1 casualty (ground) or 1 HP damage (naval)
 ```
-`defense_bonus` = sum of applicable terrain bonuses (see Terrain in Combat).
+`defense_bonus` = sum of applicable terrain bonuses (see Terrain in Combat). Higher Defense = harder to kill. Penetration reduces effective defense.
 
-If `defense − penetration < 2` → save_threshold > 12 → impossible to save (all hits deal casualties).
+If `Defense − Penetration < 2` → effective defense < 2 → impossible to save (all hits deal casualties).
 
 Both sides roll simultaneously. Casualties and HP damage are removed after both volleys fully resolve.
 
-**Unified probability table (roll ≥ n on 2d6):**
+**Probability table (roll ≤ n on 2d6):**
 
 | Roll needed | Chance |
 |---|---|
-| ≥ 4 | 92% |
-| ≥ 5 | 83% |
-| ≥ 6 | 72% |
-| ≥ 7 | 58% |
-| ≥ 8 | 42% |
-| ≥ 9 | 28% |
-| ≥ 10 | 17% |
-| ≥ 11 | 8% |
-| ≥ 12 | 3% |
+| ≤ 4 | 17% |
+| ≤ 5 | 28% |
+| ≤ 6 | 42% |
+| ≤ 7 | 58% |
+| ≤ 8 | 72% |
+| ≤ 9 | 83% |
+| ≤ 10 | 92% |
+| ≤ 11 | 97% |
 
 ### Target Allocation (Proportional Fire)
 
@@ -555,28 +554,28 @@ Use largest-remainder rounding so totals add up exactly. Example: 10 infantry + 
 
 ### Unit Combat Stats
 
-**To-Hit** = the number you need to roll ≥ on 2d6 to score a hit. Lower = more accurate.
+**To-Hit** = roll 2d6 ≤ this value to score a hit. Higher = more accurate. Modified by terrain combat_modifier when fighting from elevated ground.
 
 Ground:
 
-| Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|
-| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 2 |
-| Armor | 6 | **9** | 3 | 4 | 3 | 1 | 3 | 1 |
-| Artillery | 6 | 4 | 2 | 2 | 3 | 4 | 4 | 1 |
-| AA Gun | 9 | 4 | 1 | 1 | 3 | 1 | 2 | 1 |
-| Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 |
+| Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man | Slots |
+|---|---|---|---|---|---|---|---|---|---|
+| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 2 | 1 |
+| Armor | 8 | 9 | 3 | 4 | 3 | 1 | 3 | 1 | 2 |
+| Artillery | 8 | 4 | 2 | 2 | 3 | 4 | 4 | 1 | 2 |
+| AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
+| Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
 
 Air:
 
-| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
+| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 1 |
-| Scout Plane | — | — | 6 | 0 | — | 10 | 6 | — | 3 | 1 |
-| Bomber | 6 | 10 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 1 |
-| Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 |
+| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 1 | 2 |
+| Scout Plane | — | — | 6 | 0 | — | 10 | 6 | — | 3 | 1 | 2 |
+| Bomber | 8 | 4 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 1 | 3 |
+| Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 | 2 |
 
-`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills).
+`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (4 = ~17% hit rate, rarely kills).
 
 **Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
 
@@ -584,14 +583,14 @@ Air:
 
 Naval (HP-based; attack dice per ship):
 
-| Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 |
-| Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 1 |
-| Battleship | 3 | 6 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 2 |
-| Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 |
-| Carrier | 1 | 8 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 |
-| Submarine | 2 | 6 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 1 |
+| Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man | Slots |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 | 2 |
+| Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 1 | 2 |
+| Battleship | 3 | 8 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 2 | 3 |
+| Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 | 1 |
+| Carrier | 1 | 6 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 | 3 |
+| Submarine | 2 | 8 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 1 | 2 |
 
 All stats are starting values — tunable.
 
@@ -620,7 +619,7 @@ Bombardment is indirect fire — the target does not fire back. Resolves in Phas
 ### Rules Common to All Bombardment
 
 **Two rolls per targeted hex:**
-1. **vs Units** — one 2d6 roll per bombarder. Each roll ≥ bombarder's Attack → 1 hit. Each hit: select a unit to receive it **proportional to unit count** (a hex with 10 infantry and 2 armor has a 10/12 chance of hitting infantry). That unit makes a normal defense save. Failed save = 1 casualty or 1 HP damage as normal.
+1. **vs Units** — one 2d6 roll per bombarder. Each roll ≤ bombarder's To-Hit → 1 hit. Each hit: select a unit to receive it **proportional to unit count** (a hex with 10 infantry and 2 armor has a 10/12 chance of hitting infantry). That unit makes a normal defense save. Failed save = 1 casualty or 1 HP damage as normal.
 2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≥ To-Hit → 1 infrastructure hit. **No defense roll for infrastructure.** Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road). If it has HP → loses 1 HP. If it has no HP (urban, vegetation, road) → immediately set to damaged, or destroyed if already damaged.
 
 Multiple bombarders targeting the **same hex** pool their rolls as a single simultaneous attack — hits are totalled before any are applied.
@@ -634,20 +633,20 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 **Artillery**
 - Must be stationary to bombard (cannot move and fire same turn)
 - Target pattern: **1 hex** at range 4–6
-- Rolls: 1 attack die vs units + 1 attack die vs infra (To-Hit 6, Pen 2)
+- Rolls: 1 die vs units + 1 die vs infra (To-Hit 8, Pen 2)
 - Infrastructure selection: random among present pieces
 - No return fire from target
 
 **Battleship**
 - May move and bombard in the same turn; cancelled if engaged in naval combat that turn
 - Target pattern: **3 mutually adjacent hexes (triangle)**; player picks which triangle
-- Rolls: 3 attack dice per hex (matching combat attack dice) vs units + 3 vs infra (To-Hit 6, Pen 2)
+- Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 8, Pen 2)
 - Infrastructure selection: random among present pieces
 
 **Bombers**
 - Bombing resolves as part of air-to-ground strikes (survivors from Phase 1)
 - Target pattern: **3 hexes in a line** along the bomb run path
-- Rolls: 1 attack die per hex vs units + 1 vs infra (To-Hit 7, Pen 1)
+- Rolls: 1 die per hex vs units + 1 vs infra (To-Hit 7, Pen 1)
 - Infrastructure selection: player may **designate one target** per hex. Designated target = 70% chance of being selected; remaining 30% distributed equally among other infra present. Undesignated = equal random weight.
 
 ---
@@ -716,7 +715,10 @@ Manpower spent on construction is committed to the building and persists as HP p
 
 `production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
 
-**Production capacity** *(open design question)*: Manufacturing Facilities likely have a limited number of production slots per turn. Naval repair at Harbor also uses a slot. How many slots per facility, and do larger/more expensive units consume more slots? TBD before implementation.
+**Production capacity:**
+- Facility slots per turn = `floor(current_hp / 2)`. Full Manufacturing Facility (20 HP) = 10 slots. A facility damaged to 10 HP = 5 slots. Destroyed = 0.
+- Each unit costs `ceil(mat_cost / 2)` slots to produce (Infantry = 1, Armor = 2, Battleship = 3, etc. — see Slots column in unit stats).
+- Harbor repair capacity = `floor(current_hp / 2)` repair slots. Each ship being repaired occupies 1 slot regardless of size. Full Harbor (10 HP) = 5 concurrent repairs.
 
 ---
 

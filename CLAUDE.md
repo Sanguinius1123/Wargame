@@ -45,7 +45,7 @@ Full game design: `DESIGN.md`
 - **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.
 - **Canals:** `has_canal` allows naval through Wetlands. Costs 10 manpower, supply truck present (not consumed). No effect on land movement.
-- **Combat formula:** Per-unit dice pool. Both rolls use same direction (roll ≥ to succeed). Attack: 2d6 ≥ To-Hit → 1 hit. Save: 2d6 ≥ (14 − defense + penetration) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after. See DESIGN.md for unit stats.
+- **Combat formula:** Per-unit dice pool. Both rolls use roll-under (roll ≤ stat, higher stat = better). Attack: 2d6 ≤ To-Hit → 1 hit. Save: 2d6 ≤ (Defense − Penetration + defense_bonus) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after. See DESIGN.md for unit stats.
 - **Proportional fire:** Attacking unit types spread shots across defending unit types by count. Largest-remainder rounding to ensure totals add up.
 - **Terrain movement costs:** Derived from locomotion type + terrain base cost + attribute overlays. ×3 internal scale. No separate lookup table.
 - **Turn advance order:** Phase 1 Air → Phase 2 Naval → Phase 3 Ground → Phase 4 Collect.
