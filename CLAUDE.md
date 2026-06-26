@@ -19,41 +19,85 @@ Full game design: `DESIGN.md`
 
 ## Key Decisions (do not re-litigate)
 
+### Map & Terrain
 - **Hexes, not regions:** Flat `hexes` table (game_id, hex_q, hex_r, terrain, owner_faction_id). No settlement/system hierarchy.
-- **Two resources:** Materials (saveable, from GM-placed resource tiles, 1 per tile per turn) and Manpower (not saveable, from contiguous urban tiles per settlement via flood-fill). No development multiplier.
-- **Factions, not realms:** Simpler. One faction per player per game.
-- **Unit stacks:** One `units` row per (faction, unit_type, hex). Quantity tracked in that row. Naval units and bombers use HP instead of quantity.
-- **Movement orders:** Queued in `movement_orders` with `turn` + `sequence` fields. Multi-turn paths supported. Executed at turn advance in sequence order.
-- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))` — fractional remainder always allows one more hex, also handles minimum-1 guarantee.
-- **Mountains impassable for mechanized** without a road. Foot can always enter any ground terrain.
-- **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale). Supply trucks build roads in adjacent hexes without entering them. Rate varies: plains/desert 3 segments at 1 man each, hills 2 at 2 man each, mountains 1 at 3 man, wetlands 1 at 2 man.
-- **Fog of war (computed):** Server computes visibility at query time using `computeVisibility()` in `server/src/utils/visibility.js`. Three states: visible / scouted / dark. Scouted hexes persisted in `scouted_hexes`.
-- **Allied vision:** Table exists (`allied_vision`), always disabled. Stub only.
-- **Air units:** Flight group system (not individual orders). `is_stub=TRUE` in unit_type_config until air system is built.
-- **Registration:** REGISTRATION_CODE env var required for all signups. gm_whitelist only controls role assignment (same pattern as ScifiRNR).
-- **Vegetation is two hex attributes:** `has_light_vegetation` and `has_heavy_vegetation`. Both block LOS into-but-not-through. Give stealth bonus (+1/+3) to all units in hex.
-- **Urban is a hex attribute:** `has_urban`. Settlements (`has_settlement`) are major cities that count toward win condition and start with a Manufacturing Facility.
-- **Buildings have HP = material cost:** 1 material + 1 manpower adds 1 HP of construction per turn. Player allocates resources in installments — not operational until max HP. Airstrip (4 HP), Airbase (10 HP / 10 mat), Harbor (10 HP / 10 mat), Manufacturing Facility (20 HP / 20 mat), Bridge (3 HP). Supply truck builds Airstrip/Bridge by consuming the truck + manpower.
-- **No coast or river terrain types:** Coastal = adjacency to Water. Rivers = Water hexes going inland.
 - **Terrain types:** Plains, Hills, Mountains, Desert, Wetlands, Water. Mountains foot cost=4, mech=impassable without road. Hills foot/mech=2.
-- **Tag system:** Units have multiple tags (ground/mobile/armored/heavy/naval/air/stealth + stubs). Tags are player-facing descriptors + cost indicators + drive engine rules. More tags = higher cost.
-- **Naval units use HP not quantity stacks.** Fewer, tankier individual ships. Repaired at Harbors.
-- **Bombers use HP (3 per aircraft)** not quantity stacks. Repaired at Airbase.
-- **Production chain:** Manufacturing Facility produces all units. Adjacent Airbase required for air units. Adjacent Harbor required for naval units. Produced units spawn at the adjacent building (or nearby Carrier for air).
-- **Resources from specific tiles:** Fixed resource tiles placed by GM (mines, lumbermills, quarries, etc.). Each produces 1 material per turn when owned. Terrain type does not produce resources.
-- **Manpower:** = sum of contiguous `has_urban` tiles connected to each owned `has_settlement` hex (flood-fill). Not saveable. Damaged urban tile produces nothing. Destroyed = 0 and must be rebuilt.
+- **No coast or river terrain types:** Coastal = adjacency to Water. Rivers = Water hexes going inland.
+- **Hex ownership only for objectives:** owner_faction_id only tracked for hexes with settlements, urban tiles, resource tiles, or buildings. Plain terrain (hills, plains, etc.) has no owner.
+- **Vegetation is two hex attributes:** `has_light_vegetation` and `has_heavy_vegetation`. Both block LOS into-but-not-through. Stealth bonus +1/+3.
+- **Urban is a hex attribute:** `has_urban`. Settlements (`has_settlement`) are major cities that count toward win condition and start with a Manufacturing Facility.
+
+### Resources
+- **Two resources:** Materials (saveable, from GM-placed resource tiles, 1 per tile per turn) and Manpower (not saveable, flood-fill from urban tiles per settlement).
+- **Manpower timing:** Collected in Phase 4. Spent at the start of the NEXT turn during the ordering phase. Cannot be saved across turns.
+- **Manpower source:** Sum of contiguous `has_urban` tiles connected to each controlled `has_settlement` hex. Damaged urban tile produces nothing.
+
+### Settlement Control & Win Condition
+- **Settlement control threshold:** A settlement is controlled only if one faction owns ≥ 3/4 of its assigned urban tiles. Contested = no one meets threshold → no manpower, no victory credit.
+- **Urban tile assignment:** Each tile assigned to nearest settlement hex (hex distance). Tie-break: tile goes to settlement owned by same faction as tile owner.
+- **Win condition:** Hold 2/3 of all `has_settlement` hexes in a **controlled** state at end of Phase 4. Tunable per player count.
+
+### Units
+- **Unit stacks:** One `units` row per (faction, unit_type, hex). Quantity tracked in that row. Ground units auto-merge in same hex. Split by giving different movement orders.
+- **Naval units use HP not quantity stacks.** Repaired at Harbors.
+- **Bombers use HP (3 per aircraft).** `quantity = ceil(current_hp / 3)`. Repaired at Airbase.
+- **Fighters use quantity stacks** (same as ground units). Each failed save = 1 fighter lost.
 - **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.
-- **Canals:** `has_canal` allows naval through Wetlands. Costs 10 manpower, supply truck present (not consumed). No effect on land movement.
-- **Combat formula:** Per-unit dice pool. Both rolls use roll-under (roll ≤ stat, higher stat = better). Attack: 2d6 ≤ To-Hit → 1 hit. Save: 2d6 ≤ (Defense − Penetration + defense_bonus) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after. See DESIGN.md for unit stats.
-- **Proportional fire:** Attacking unit types spread shots across defending unit types by count. Largest-remainder rounding to ensure totals add up.
-- **Terrain movement costs:** Derived from locomotion type + terrain base cost + attribute overlays. ×3 internal scale. No separate lookup table.
-- **Turn advance order:** Phase 1 Air → Phase 2 Naval → Phase 3 Ground → Phase 4 Collect.
+- **Unit roster:** Infantry, Armor, Artillery, AA Gun, Supply (ground); Fighter, Scout Plane, Bomber, Transport Plane (air); Destroyer, Frigate, Cruiser, Battleship, Transport (ship), Carrier, Submarine (naval).
+
+### Movement
+- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`.
+- **Mountains impassable for mechanized** without a road. Foot can always enter any ground terrain.
+- **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale).
+- **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
+- **Canals:** `has_canal` allows naval through Wetlands. 10 manpower, supply truck present (not consumed).
+- **Air movement:** Ignore terrain. Fighter move=30, Scout=35, Bomber=40, Transport Plane=25.
+
+### Combat
+- **Combat formula:** Roll-under. Attack: 2d6 ≤ To-Hit → 1 hit. Save: 2d6 ≤ (Defense + defense_bonus − Penetration) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after.
+- **Proportional fire:** Each attacking unit type spreads shots across defending types by count. Largest-remainder rounding. Applies in air intercept too — all units on both sides fire proportionally, dice earmarked per target type before roll.
+- **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
+- **Artillery:** Range 1–8. Stationary. Cannot bombard if engaged in close combat (enemies in own hex). 0 attack dice in direct combat — destroyed automatically if alone against enemies.
+- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate — hits all units including friendly. Artillery (1 hex, To-Hit 8, Pen 2, 1 die). Battleship (3-hex triangle, To-Hit 8, Pen 2, 3 dice/hex). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
+- **Artillery in direct combat:** 0 attack dice. Destroyed automatically if left alone vs enemies.
+
+### Detection & Fog of War
+- **Auto-detection rule:** effective_stealth = unit.stealth_rating + terrain_stealth_modifier. If effective_stealth = 0 → auto-detected within LOS (no roll). If effective_stealth > 0 → detection roll required.
+- **Detection formula (roll-under):** detection_score = 7 + effective_detection − effective_stealth − distance. Roll 2d6 ≤ detection_score → detected. Score > 12 = auto-detect, < 2 = impossible.
+- **Fog of war:** Two display states only — Visible / Dark. "Scouted" is internal DB concept (scouted_hexes table) for showing terrain on Dark hexes. Not a display state.
+- **Cannot target undetected units:** No AA fire, no intercept, no bombardment against undetected units.
+- **Submarine one-sided combat:** Undetected sub can attack surface ships; target cannot fire back. Post-attack: target gets +2 bonus detection roll. If it succeeds, sub position revealed for next turn (no additional combat this turn).
+
+### Air System
+- **Flight group system:** Air actions use flight groups (not individual orders). Fighters (escort) + Bombers (strike) + Scout Planes (LOS). AA fires before patrol intercepts.
+- **Intercept combat:** One combined simultaneous battle — all fighters and bombers on both sides roll at once. No sequential escort-first-then-bombers.
+- **Bomber routing:** After Phase 1, surviving bombers assigned to Phase 2 (naval target) or Phase 3 (ground target).
+- **Patrol radius (air):** `floor((movement − 2 × distance_to_patrol_center) / 6)`. Fighter at home airbase = radius 5.
+- **Naval AA:** Frigate overwatch (To-Hit 10, Pen 1, Range 3). Battleship overwatch (To-Hit 7, Pen 0, Range 1 — point defense only).
+
+### Buildings
+- **HP = material cost:** 1 mat + 1 man = +1 HP construction progress. Not operational until max HP.
+- **Buildings:** Manufacturing Facility (20 HP), Airbase (10 HP), Harbor (10 HP), Airstrip (4 HP, supply consumed), Bridge (3 HP, supply consumed), Fortification (4 HP, supply consumed, +1 defense to all ground units in hex until destroyed — damaged state still gives full bonus).
+- **Production capacity:** Slots = floor(current_hp / 2). Unit slot cost = ceil(mat_cost / 2). Full Mfg Facility (20 HP) = 10 slots.
+- **Repair capacity:** Harbor and Airbase each have floor(current_hp / 2) repair slots. Repair cost = ceil(mat_cost/4) mat + ceil(man_cost/4) man. Requires explicit Repair order; only available when damaged at facility.
+- **Fortification:** Full +1 defense bonus at any HP > 0. Only destroyed (HP=0) removes bonus. Applies to all friendly ground units in hex, all attack types including bombardment.
+
+### Turn Structure
+- **Two meta-phases:** Player Turn Phase (review, production, orders) then Resolution Phase (Phases 1–4 auto-execute).
+- **Manpower spent in ordering phase** (not Phase 4). Players spend the manpower collected last Phase 4.
+- **Phase 1 Air → Phase 2 Naval → Phase 3 Ground → Phase 4 Return & Collect.**
 - **Finish turn:** Player-driven. All players ready → auto-advance. GM can force.
-- **Flight group system:** Air actions use flight groups. AA fires before patrol intercepts. Stealth groups require detection roll before AA/intercept can engage.
-- **Stealth and detection:** Universal system. Units in open = auto-detected. Units in cover get terrain stealth bonus. Stealth-tagged units always need detection roll. Formula: threshold = 7 + distance + effective_stealth − effective_detection. Roll 2d6 ≥ threshold. Cannot target undetected units.
-- **Win condition:** Hold 2/3 of `has_settlement` hexes in a **controlled** state at end of turn. A settlement is controlled if one faction owns ≥ 3/4 of its assigned urban tiles. Contested settlements (no one meets threshold) count for no one — no manpower, no victory credit. Tunable per player count.
-- **Bombardment mechanics:** Two rolls per hex (vs units, vs infra). Units get normal defense save with bombarder's pen. No save for infrastructure — random selection, HP infra loses 1 HP, no-HP infra set damaged/destroyed. Artillery: 1 hex, range 4–6, stationary, 1 die per hex (To-Hit 6, Pen 2). Battleship: 3-hex triangle, 3 attack dice per hex, can move+bombard (To-Hit 6, Pen 2). Bombers: 3-hex line, 1 die per hex, player designates infra target (70% hit chance) (To-Hit 7, Pen 1). Blind fire = no report. Empty hex = wasted.
+- **Phase 4 order:** Air return → Materials collected → Production queue advances → Settlement control evaluated → Manpower calculated → Win condition check → Reset.
+
+### Patrol
+- **Ground patrol:** Foot radius 1, mechanized radius 2. Unit moves to intercept enemies entering patrol area (LOS required to react).
+- **Naval patrol:** Radius 2. Ships move to intercept enemy ships entering patrol area.
+- **Air patrol:** Formula-based radius. Each detected enemy flight group triggers separate intercept combat.
+
+### Orders
+- **Fortify:** Any ground unit. One uninterrupted turn → +1 defense bonus. Cancelled if engaged before completion. Bonus persists until unit moves. Stacks with terrain and Fortification building bonus.
+- **Repair:** Naval at Harbor, air at Airbase. Only when damaged. Uses 1 repair slot.
 
 ## Schema
 
@@ -66,24 +110,29 @@ supabase/migrations/
   005_fog.sql                 — scouted_hexes, allied_vision (stub), player hex RLS
   006_seed.sql                — 10×10 dev map with mixed terrain
   007_additions.sql           — (NOT YET WRITTEN) needs:
-                                - terrain_type_config: update terrain list (remove coast/river/
-                                  forest/urban, add hills/desert/wetlands, rename sea→water),
-                                  add foot_cost, mech_cost (×3 scale), road_segments_per_turn,
+                                - terrain_type_config: update terrain list, add foot_cost,
+                                  mech_cost (×3 scale), road_segments_per_turn,
                                   road_manpower_per_segment, combat_modifier, blocks_los, elevation
-                                - unit_type_config: overhaul all stats — locomotion tag replaces
-                                  category, add to_hit, defense, penetration, def_to_hit,
-                                  hp (for naval + bombers), stealth_rating, detection_rating
-                                - hex attributes: has_light_vegetation, has_heavy_vegetation,
-                                  has_urban, has_settlement, has_airstrip, has_airbase, has_harbor,
-                                  has_bridge, has_road, has_canal, has_railroad (stub),
-                                  is_damaged, is_destroyed
+                                - unit_type_config: overhaul all stats — tags, to_hit, defense,
+                                  penetration, def_to_hit, hp (naval + bombers), stealth_rating,
+                                  detection_rating, overwatch_to_hit, overwatch_pen, overwatch_range,
+                                  move, los, atk_range, mat_cost, man_cost, slots, carrier_slots
+                                - hexes: add has_light_vegetation, has_heavy_vegetation, has_urban,
+                                  has_settlement, has_road, has_railroad(stub), has_airstrip,
+                                  has_airbase, has_harbor, has_bridge, has_canal
+                                - hexes: owner_faction_id only meaningful for objective hexes
                                 - combat_log table
                                 - production_queue table
                                 - flight_groups table
+                                - resource_tiles table
+                                - faction_relationships table
                                 - movement_orders: add sequence, order_type columns
                                 - game_participants: add turn_ready column
-                                - units: add standing_order, hp columns
-                                - buildings table (hex, type, current_hp, max_hp, status)
+                                - units: add standing_order, hp, fortification_level columns
+                                - buildings table (game_id, hex_q, hex_r, type, current_hp,
+                                  max_hp, status, owner_faction_id)
+                                  types: manufacturing_facility, airbase, harbor, airstrip,
+                                  bridge, fortification
 ```
 
 ## Key Server Routes
@@ -99,8 +148,8 @@ POST /api/games/:gameId/finish-turn  — player marks ready; auto-advances when 
 GET  /api/games/:gameId/turn-status  — GM: list of players + turn_ready status
 GET  /api/map/:gameId/hexes          — fog-of-war filtered for players; full for GM
 GET  /api/map/:gameId/hexes/:q/:r    — single hex detail
-PATCH /api/map/:gameId/hexes/:q/:r  — GM edits terrain/development/owner
-POST /api/map/:gameId/orders         — player queues movement/bombard/defend/wait order
+PATCH /api/map/:gameId/hexes/:q/:r  — GM edits terrain/attributes/owner
+POST /api/map/:gameId/orders         — player queues movement/bombard/fortify/repair/flight group/patrol order
 DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit
 POST /api/map/:gameId/production     — queue unit production at a facility hex
 POST /api/gm/:gameId/units           — GM places unit
@@ -133,12 +182,11 @@ client/src/
 - [x] Client scaffold (all pages + components)
 - [x] Supabase project created
 - [x] .env files configured (REGISTRATION_CODE=wargame)
-- [x] DESIGN.md fully written — terrain, movement, combat, buildings, fog, resources, units
-- [x] **Bombardment mechanics designed**
+- [x] DESIGN.md complete — all mechanics fully designed and reviewed
 - [ ] Migration 007 written and applied
 - [ ] Combat resolution implemented (server/src/utils/combat.js)
 - [ ] Movement validation implemented (server/src/utils/movement.js)
-- [ ] advance-turn rewritten with full combat + production pipeline
+- [ ] advance-turn rewritten with full 4-phase pipeline
 - [ ] finish-turn + turn-status endpoints
 - [ ] Production queue endpoint
 - [ ] Movement order UI (click unit → click destination → SVG arrows)
