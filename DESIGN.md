@@ -50,13 +50,13 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
 2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
 3. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
-   - **Artillery bombardment:** stationary artillery fire at designated target hexes.
+   - **Artillery bombardment:** stationary artillery not engaged in close combat fire at designated target hexes.
    - **Naval bombardment:** Battleships with validated bombard orders fire at designated land hexes.
    - **Air-to-ground strikes:** surviving bombers assigned to ground targets execute Bombing Run or Attack Run orders.
    - All bombardment and strikes are **indiscriminate** — all units in the targeted hex (friendly, enemy, allied) are eligible to be hit. If allied or friendly units are present in a bombarded hex, they may take casualties.
    - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
-5. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
-6. **Hex capture.** Any hex where exactly one faction's ground units remain → that faction captures the hex. Buildings and infrastructure transfer to new owner in current state.
+4. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
+5. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, manufacturing facility, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
 
 ---
 
@@ -68,8 +68,8 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
    - Units with no reachable landing site → crash and are destroyed.
 2. **Materials collected.** +1 per owned resource tile.
 3. **Production queue advances.** All `pending` orders → `ready`. Units available to place at start of next turn.
-4. **Manpower calculated and held.** Flood-fill from each owned `has_settlement` hex through contiguous `has_urban` tiles. Total = manpower budget available to spend at the start of the next turn. Damaged urban tiles produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
-5. **Settlement control evaluated.** For each settlement: assign urban tiles by proximity (see Settlement Control rules), count ownership, apply the 3/4 threshold. Each settlement resolves to controlled (by one faction) or contested. This result drives both manpower calculation (step 4) and the win condition check.
+4. **Settlement control evaluated.** For each settlement: assign urban tiles by proximity (see Settlement Control rules), count ownership, apply the 3/4 threshold. Each settlement resolves to controlled (by one faction) or contested.
+5. **Manpower calculated and held.** Using the settlement control results from step 4: sum the assigned urban tile counts of all controlled settlements per faction. Total = manpower budget available to spend at the start of the next turn. Damaged urban tiles produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
 6. **Win condition check.** Count settlements in a **controlled** state per faction. Any faction controlling ≥ 2/3 of all settlements → wins. Contested settlements count for no one.
 7. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
 
@@ -293,6 +293,10 @@ Roads connect visually: adjacent road tiles draw a road line between them, inclu
 | `has_urban` | +0 | +1 | no effect | no effect |
 | `has_airstrip` / `has_airbase` | no effect | no effect | no effect | required to land |
 
+### Ground Unit Stacks
+
+All ground units of the same faction in a hex form a single stack and act together. Units of different types in the same hex (e.g. infantry + armor) are one combined force for combat purposes. To split a stack, give different movement orders to different portions — units with different destinations will separate at movement execution. Producing additional units of a type already present in a hex merges them automatically (one `units` row per faction + unit_type + hex).
+
 ### Naval Landing
 
 Transport ships (naval + ground) offload ground units to adjacent land hexes. Ground units enter the land hex at cost 1 movement. Transport capacity: **6 slots**. Each unit currently occupies 1 slot (subject to change; some units may occupy 2).
@@ -356,7 +360,11 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 - Air units: produced at Manufacturing Facility with adjacent Airbase. Spawned at the Airbase (or a Carrier within adjacent range).
 - Naval units: produced at Manufacturing Facility with adjacent Harbor. Spawned at the Harbor.
 
-**Supply units as builders:** Construct roads (present in hex + 1 manpower), airstrips and bridges (consumed). Roads are cheap and repeatable — one Supply unit can pave a network over multiple turns.
+**Supply units as builders:** One action per turn — the truck either moves OR builds, not both. Build actions:
+- **Road:** truck stays in place, builds up to 3 segments in adjacent hexes (per terrain limits). Truck not consumed. Segments complete immediately in Phase 4.
+- **Airstrip / Bridge:** truck moves into position and commits to construction. Truck is consumed at completion. Construction completes at end of Phase 4 (production step). If the truck is destroyed during Phase 3 ground combat before Phase 4, construction fails and all resources spent are lost.
+
+A truck executing a road order builds during Phase 3 in place. A truck committed to airstrip/bridge construction does not move that turn and is consumed at Phase 4.
 
 ---
 
@@ -364,14 +372,14 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 
 ### Who Needs a Detection Roll
 
-| Unit type | In cover (vegetation/urban/hills/mountains) | In open (plains/desert/water) |
-|---|---|---|
-| No stealth tag | Gets terrain stealth bonus → roll required | Stealth = 0 → **auto-detected** within LOS |
-| Has stealth tag | Base stealth + terrain modifier → roll required | Base stealth − terrain penalty → roll required |
+The rule is simple: **effective_stealth = unit.stealth_rating + terrain_stealth_modifier**.
 
-Units with the `stealth` tag always require a detection roll. Terrain modifies effective stealth up or down.
+- **effective_stealth = 0** → unit is **auto-detected** by any unit with LOS to it. No roll required.
+- **effective_stealth > 0** → detection roll required (see Detection Formula).
 
-**You cannot target what you have not detected.** Undetected stealth units cannot be fired upon by AA, intercepted by patrol fighters, bombarded, or otherwise engaged.
+Non-stealth units (stealth_rating = 0) in open terrain (no stealth bonus) have effective_stealth = 0 and are always auto-detected within LOS. The same units inside cover (hills, vegetation, urban) gain a terrain bonus, giving them effective_stealth > 0, and now require a roll. Units with the `stealth` tag have a base stealth_rating > 0 and always require a roll regardless of terrain.
+
+**You cannot target what you have not detected.** Undetected units cannot be fired upon by AA, intercepted by patrol, bombarded, or otherwise engaged.
 
 ### Terrain Stealth Modifiers
 
@@ -429,6 +437,10 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 - Detects via sonar (detection stat) only.
 - Can only detect naval surface units — not ground, not air. Air units cannot detect or attack submarines either.
 - Contributes no fog-of-war vision to its faction beyond its own hex.
+
+**One-sided submarine combat:** if a submarine detects a surface ship but the surface ship fails its detection roll, the submarine attacks and the surface ship cannot fire back. The surface ship receives a battle report: "attacked by undetected submarine(s)" — it knows it was hit but does not know the submarine's exact position.
+
+**Post-attack detection bonus:** after a submarine fires, the attacked faction immediately makes a bonus detection roll with +2 to detection score. If it succeeds, the submarine's position is revealed for the start of next turn (not in time to fire back this turn). This gives surface ships a chance to locate and hunt a submarine that just attacked them.
 
 ### Stealth by Unit Type
 
@@ -519,20 +531,15 @@ patrol_radius = floor((movement − 2 × distance_to_patrol_center) / 6)
 
 **UI:** when a player designates a patrol center, the map highlights the patrol center and the computed patrol radius so the player sees exactly what will be covered before confirming the order.
 
-Patrol persists turn to turn until cancelled. A patrolling unit cannot also move that turn. Undetected stealth flight groups pass through without triggering intercept.
+Patrol persists turn to turn until cancelled. A patrolling unit cannot also move that turn (it uses its movement to respond to contacts). Undetected units pass through without triggering intercept.
 
-**Patrol engages every group** — each detected flight group that enters the patrol area triggers a separate intercept combat. Casualties from each engagement apply immediately before the next group is engaged. This means sending a fighter group first to attrit the defending patrol, then following with bombers, is a valid tactic.
+**Patrol engages every contact** — each detected enemy entering the patrol area triggers a separate engagement. Casualties apply immediately before the next engagement. For air, this means sending a fighter sweep first to attrit the patrol, then following with bombers, is a valid tactic.
 
----
+**Ground patrol:** patrolling foot/mechanized units move out (up to their patrol radius) to intercept and stop enemy ground units that enter their patrol area. The patrolling unit must have LOS to the enemy to react. Intercepted enemy movement stops; ground combat triggers in the hex where contact is made.
 
-## Air Phase Resolution (Phase 1 Detail)
+**Naval patrol:** patrolling ships move out (up to patrol radius 2) to intercept enemy ships that enter their patrol area. Contact follows the same rules as normal naval movement contact — ships stop, fight, then survivors continue. LOS applies; ships must detect the contact to react. Detection rolls apply as normal for submerged submarines.
 
-1. All flight groups commit to paths simultaneously
-2. **AA Overwatch fires** — each AA fires at every detected flight group passing through its overwatch zone. Multiple AA units fire independently. AA must detect the group first (stealth groups require a roll).
-3. **Patrol intercepts** — engage each group whose path crossed the patrol area. Multiple patrol zones = multiple separate intercept combats. Stealth groups that aren't detected pass through.
-4. **Surviving bombers** carry strike orders into Phase 3
-
-AA fires before patrol intercepts.
+**Air patrol:** fighters fly out to intercept detected enemy flight groups entering the patrol area. The patrol radius formula determines coverage (see above). Undetected stealth groups pass through without triggering intercept.
 
 ---
 
@@ -547,6 +554,7 @@ AA fires before patrol intercepts.
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
+| **Repair** | naval (at Harbor), air (at Airbase) | Only available if unit is damaged AND at a repair facility. Uses 1 repair slot. Completes in 1 turn. |
 | **Skirmish Hold** *(stub)* | ground | Reduced damage; no advance even if enemy wiped. |
 | **Skirmish Retreat** *(stub)* | ground | Fire then fall back to designated hex. |
 
@@ -728,13 +736,14 @@ All stats are placeholder values — balance tuning deferred until after test ga
 
 ### Air Intercept Combat
 
-| Matchup | Attacker to-hit | Defender to-hit |
-|---|---|---|
-| Fighter vs Fighter | 7 | 7 |
-| Fighter vs Bombers (no escort) | 7 | 10 (tail gun only) |
-| Escort vs Patrol Fighters | 7 | 7 |
+Intercept is one combined simultaneous battle. All units on both sides roll at the same time — there is no sequential escort-first-then-bombers sequence. Proportional fire applies: each unit type on one side distributes shots across all unit types on the opposing side by count.
 
-After escort vs patrol resolves, surviving patrol fighters engage bombers. Bombers surviving any intercept continue to target.
+| Unit in intercept | To-Hit | Notes |
+|---|---|---|
+| Fighter | 7 | Fires at all opposing units proportionally |
+| Bomber (tail gun) | 4 | Fires at all opposing units proportionally; low accuracy |
+
+Each die is earmarked for a target unit type (via proportional fire calculation) before the attack roll is made, then the defense roll is made against that unit type's defense stat.
 
 ### Movement and Combat Interaction
 
@@ -768,10 +777,11 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 
 **Artillery**
 - Must be stationary to bombard (cannot move and fire same turn)
-- Target pattern: **1 hex** at range 4–6
+- Cannot bombard if enemy units are present in the artillery's own hex (engaged in close combat — check before executing bombard orders)
+- Target pattern: **1 hex** at range 1–8
 - Rolls: 1 die vs units + 1 die vs infra (To-Hit 8, Pen 2)
 - Infrastructure selection: random among present pieces
-- No return fire from target
+- No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
 **Battleship**
 - May move and bombard in the same turn; cancelled if engaged in naval combat that turn
@@ -839,16 +849,16 @@ Manpower not spent during the ordering phase is wasted.
 
 **Production panel** — shown at the **start of each turn**, before orders are set:
 1. **Place completed units** — units whose production was queued last turn are ready. Player chooses spawn location at the relevant facility (Manufacturing Facility for ground, Airbase for air, Harbor for naval).
-2. **Queue new production** — player selects unit types to produce this turn. Materials are deducted immediately from stockpile. Manpower is reserved from this turn's Phase 4 collection.
+2. **Queue new production** — player selects unit types to produce this turn. Materials are deducted immediately from stockpile. Manpower is deducted from the budget carried forward from the previous turn's Phase 4.
 
-**Production time:** always 1 turn. Pay resources turn N → place unit at start of turn N+1.
+**Production time:** always 1 turn. Pay resources at start of turn N → unit available to place at start of turn N+1.
 
 **Spawn rules:**
 - Ground units: spawn at Manufacturing Facility
 - Air units: spawn at adjacent Airbase (or a Carrier within adjacent range)
 - Naval units: spawn at adjacent Harbor
 
-**Resource payment:** Materials deducted from stockpile immediately. Manpower reserved from this turn's collection (Phase 4). If a settlement is captured or destroyed before Phase 4 and manpower falls short, production is cancelled (materials refunded).
+**Resource payment:** Materials deducted from stockpile immediately. Manpower deducted from this turn's manpower budget (collected last Phase 4). You can only queue what your current budget allows — no shortfall risk since you spend known resources.
 
 `production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
 
@@ -927,8 +937,6 @@ Collapsible sidebar: units needing orders, idle facilities.
 - **Patrol range** — finalize 1 or 2 hexes after balance testing
 - **Emergency landing** — air units with no valid airstrip crash; rules for forced landing at non-airstrip hexes
 - **Commando unit** — ground + stealth; infiltration behind lines
-- **Naval AA** — Destroyers / Carriers firing at air units
-- **Air vs naval strikes** — bombers targeting ships
 - **Fortify order** — build up `fortification_level` defense bonus over turns
 - **Supply lines** — full radius + Supply unit implementation
 - **Allied vision sharing** — wire up `allied_vision` table
