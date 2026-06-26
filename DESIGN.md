@@ -372,7 +372,17 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 **Bombing Run** is for infrastructure destruction: 3-hex line, designated infra targets, both unit and infra rolls (see Bombardment section).
 
-**Attack Run** is for targeting mobile forces or ships: player designates a single target hex. Bombers fly there, detect enemy units using normal detection rules, and attack the first detected unit (1 die per bomber, To-Hit 7, Pen 1 vs units only — no infra roll). If nothing is detected in the target hex, the run is wasted. Bombers return to base.
+**Attack Run** is for targeting mobile forces or naval units:
+- Player designates a destination hex. Fighter escorts engage any enemy fighters along the path (normal intercept rules).
+- Bombers search for detected enemy units within **3 hexes of the destination** (large search area).
+- **Target allocation** — assign bombers to detected targets using stack-priority algorithm:
+  1. Sort detected targets by unit count, largest first.
+  2. Assign `min(remaining_bombers, target_unit_count)` bombers to each target in order.
+  3. If bombers remain after one pass, repeat from the top until all bombers are assigned.
+  - *Examples: 10 bombers vs a 10-stack + 5-stack → all 10 bomb the 10-stack. 10 bombers vs a 9-stack + 6-stack → 9 bomb the 9-stack, 1 bombs the 6-stack. 10 bombers vs 5 single-unit tiles → 2 bombers per tile.*
+- Each assigned bomber makes **1 attack roll** against its target hex (To-Hit 7, Pen 1 vs units only — no infrastructure roll).
+- Normal defense save applies per hit. Bombers return to base after attacking.
+- If no units are detected within 3 hexes of destination, the run is wasted.
 
 **Path validation:** system checks every unit has enough movement for outbound path + return to nearest friendly airstrip/airbase. Rejected if any unit falls short.
 
