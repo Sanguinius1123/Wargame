@@ -74,14 +74,16 @@ Resources are not produced by terrain type. They are produced by specific resour
 |---|---|
 | `has_light_vegetation` | Blocks LOS†. No move penalty for foot; +2 for mechanized. Stealth +1 for all units. |
 | `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. |
-| `has_urban` | City environment. Stealth +2. +1 move cost for mechanized. |
+| `has_urban` | City environment. Stealth +2. +1 move cost for mechanized. Contributes to manpower for connected settlement. |
 | `has_settlement` | Major urban center. Counts toward win condition. Starts with a Manufacturing Facility. |
-| `has_airstrip` | Hosts air units. Cannot produce them. Has HP. |
+| `has_road` | Road. Ground units moving through this hex pay 1 movement cost regardless of terrain. Supply unit builds (1 manpower; truck not consumed). |
+| `has_railroad` | *(Stub)* Railroad. Very fast ground unit movement. Expensive to build. |
+| `has_airstrip` | Hosts air units. Cannot produce them. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_airbase` | Hosts and produces air units. Must be adjacent to a Manufacturing Facility. Has HP. |
 | `has_harbor` | Naval production and repair. Must be on/adjacent to a Water hex. Has HP. |
-| `has_bridge` | Foot/mechanized may cross this Water hex. Has HP. |
+| `has_bridge` | Foot/mechanized may cross this Water hex. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_canal` | Naval units may enter this Wetlands hex. Significant manpower cost to build. |
-| `is_damaged` | Building/infrastructure is damaged — reduced output. Still functional for movement. |
+| `is_damaged` | Building/infrastructure is damaged — reduced output. Still functional for movement (bridges still passable). |
 | `is_destroyed` | Building/infrastructure is destroyed — non-functional. Still visible on map. Repairable. |
 
 †The attribute hex itself is visible; hexes beyond it are not.
@@ -165,6 +167,8 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 *Naval cannot enter Wetlands without `has_canal`. Canals cost significant manpower to dig. Supply units are the builders for remote construction.
 
+**Roads:** Any hex with `has_road` costs **1 movement point** for ground units (foot and mechanized), regardless of the base terrain cost. A mountain road still costs 1. Naval and air are unaffected.
+
 **Desert asymmetry:** foot pays 2 (heat, exhausting); mechanized pays 1 (flat open terrain, ideal for armor).
 
 ### Hex Attribute Movement Effects
@@ -192,26 +196,37 @@ Air units ignore terrain costs. Must start and end every turn on a hex with `has
 
 Buildings are placed on the map (either by GM at start or built by players during the game). They have HP, can be damaged or destroyed.
 
-| Building | HP | Function | Placement rules |
-|---|---|---|---|
-| Manufacturing Facility | 8 | Produces ground units; enables adjacent airbase/harbor production | Pre-placed at settlements; player-buildable elsewhere |
-| Airbase | 6 | Produces + hosts air units | Must be adjacent to a Manufacturing Facility |
-| Airstrip | 4 | Hosts air units only; no production | Anywhere |
-| Harbor | 6 | Produces + repairs naval units | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
-| Bridge | 3 | Enables foot/mechanized to cross Water hex | GM-placed or player-built (material + manpower cost) |
+| Building | HP | Materials | Manpower | Supply unit? | Placement rules |
+|---|---|---|---|---|---|
+| Manufacturing Facility | 8 | 20 | 20 | No | Pre-placed at settlements; player-buildable elsewhere |
+| Airbase | 6 | 10 | 10 | No | Must be adjacent to a Manufacturing Facility |
+| Harbor | 6 | 10 | 10 | No | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
+| Airstrip | 4 | 0 | 2 | Consumed | Anywhere |
+| Bridge | 3 | 0 | 2 | Consumed | On a Water hex |
+| Road | — | 0 | 1 | Present (not consumed) | Any passable land hex |
+
+**Repair costs:**
+```
+Naval (at Harbor):    cost = ceil(build_cost / 4)  → restores to full HP
+
+Building (per resource type):
+    cost = ceil(build_cost_for_resource × hp_missing / (2 × max_hp))
+    Always round up. Player chooses how much HP to restore.
+```
+
+Example: Manufacturing Facility (20 materials, 8 HP max), damaged to 1 HP (7 HP missing):
+- Materials: ceil(20 × 7 / 16) = ceil(8.75) = 9 materials to fully repair
 
 **Damage states:**
-- `is_damaged` — HP between 1 and 50% of max. Building functions at reduced capacity (e.g., Manufacturing Facility produces at half rate). Bridge is still passable when damaged.
-- `is_destroyed` — HP = 0. Non-functional. Bridge impassable. Facility produces nothing. Hex tag remains to show what was there. Repairable (Supply unit).
+- `is_damaged` — HP 1 to 50% of max. Reduced output. Bridges still passable.
+- `is_destroyed` — HP = 0. Non-functional. Bridge impassable. Tag stays on hex.
 
 **Production chain:**
 - Ground units: produced at Manufacturing Facility
-- Air units: produced at Manufacturing Facility, requires adjacent Airbase. Spawned at the Airbase (or a Carrier within range).
-- Naval units: produced at Manufacturing Facility, requires adjacent Harbor. Spawned at the Harbor.
+- Air units: produced at Manufacturing Facility with adjacent Airbase. Spawned at the Airbase (or a Carrier within adjacent range).
+- Naval units: produced at Manufacturing Facility with adjacent Harbor. Spawned at the Harbor.
 
-**Newly produced air units** may be placed on a Carrier that is close enough to the producing Airbase (within adjacent range), instead of at the Airbase itself.
-
-**Supply units as builders:** Supply units can construct remote infrastructure (bridges, airstrips, canals) far from industrial centers. This fills their niche beyond logistics.
+**Supply units as builders:** Construct roads (present in hex + 1 manpower), airstrips and bridges (consumed). Roads are cheap and repeatable — one Supply unit can pave a network over multiple turns.
 
 ---
 
@@ -501,17 +516,31 @@ Stealth units are invisible until detected — they do not appear on enemy maps 
 
 ---
 
-## Production
+## Resources
 
-**Sources:**
-- Specific resource tiles placed by GM (mines → materials, cities → manpower, etc.)
-- Resource amount is fixed per tile, collected per turn when owned
+### Materials
+Produced by specific resource tiles placed by the GM on the map. Each tile produces **1 material per turn** when owned (tunable later). Tile types: mines, lumbermills, quarries, farms, ports, etc. Materials **accumulate between turns** (saveable).
+
+### Manpower
+**Not saveable.** Generated each turn, must be spent that turn or lost.
+
+Manpower per turn = sum over all controlled settlements of their connected urban tile count. "Connected" = contiguous cluster of `has_urban` hexes attached to the `has_settlement` hex (flood-fill adjacency).
+
+- Small town (4 connected urban tiles) → 4 manpower/turn
+- Large city (10 connected urban tiles) → 10 manpower/turn
+
+Controlling urban sprawl around a settlement directly increases your manpower budget. Expensive constructions (Manufacturing Facility = 20 manpower) require large cities or multiple cities active in the same turn.
+
+*(Open question: should expensive builds span multiple turns, drawing from each turn's manpower budget? TBD.)*
+
+---
+
+## Production
 
 **Unit production:**
 - Ground units: at Manufacturing Facility
-- Air units: at Manufacturing Facility + adjacent Airbase
-- Naval units: at Manufacturing Facility + adjacent Harbor
-- Produced units spawn at the adjacent building, or on a Carrier within range (air units only)
+- Air units: at Manufacturing Facility with adjacent Airbase → spawned at Airbase (or Carrier within adjacent range)
+- Naval units: at Manufacturing Facility with adjacent Harbor → spawned at Harbor
 
 `production_queue`: game, faction, target hex, unit type, quantity, turn queued, status.
 
@@ -563,6 +592,8 @@ Collapsible sidebar: units needing orders, idle facilities.
 
 ## Future Features
 
+- **Manpower multi-turn construction** — decide if expensive builds (MF = 20 manpower) can draw from consecutive turns' budgets
+- **Railroads** — `has_railroad` hex attribute. Very fast ground unit movement. Expensive to build. Supply unit + large material/manpower cost.
 - **Flight group turn-around rules** — abort at X casualties if movement permits
 - **Patrol range** — finalize 1 or 2 hexes after balance testing
 - **Emergency landing** — air units with no valid airstrip crash; rules for forced landing at non-airstrip hexes
@@ -575,5 +606,6 @@ Collapsible sidebar: units needing orders, idle facilities.
 - **Victory condition tuning** — per player count, alternative win types
 - **Skirmish orders** — Hold and Retreat sub-modes
 - **Subterranean, hover, orbital, space** locomotion tags
-- **Naval repair** — at Harbors, cost manpower/production per HP restored
-- **Canal building** — Supply unit digs canal through Wetlands hex
+- **Naval repair** — at Harbors, cost = ceil(build_cost / 4) → full HP restore
+- **Canal building** — Supply unit digs canal through Wetlands hex (significant manpower cost)
+- **Map visual clarity** — terrain types, buildings, roads, bridges, settlements, units in LOS must all be immediately readable at a glance. Drive hex rendering with distinct colors, icons, and overlays per attribute.
