@@ -28,20 +28,25 @@ Full game design: `DESIGN.md`
 - **Allied vision:** Table exists (`allied_vision`), always disabled. Stub only.
 - **Air units:** Fighter + Bomber implemented as flight groups (not individual unit orders). `is_stub=TRUE` in unit_type_config until air system is built.
 - **Registration:** REGISTRATION_CODE env var required for all signups. gm_whitelist only controls role assignment (same pattern as ScifiRNR).
-- **Vegetation is two hex attributes:** `has_light_vegetation` (no move penalty for foot, +2 for mechanized) and `has_heavy_vegetation` (+2 for foot, impassable for mechanized). Both block LOS into-but-not-through.
-- **Urban is a hex attribute:** `has_urban BOOLEAN`, not a terrain type. Overlays any terrain. Grants production/manpower + defense bonus.
-- **Airstrip is a hex attribute:** `has_airstrip BOOLEAN`. Any terrain can have an airstrip.
-- **No coast or river terrain types:** "Coastal" is implicit from adjacency to Water. Rivers are Water hexes going inland.
-- **Locomotion types replace categories:** Units have a `locomotion` field (foot / mechanized / naval / air / hover / orbital / space / subterranean). Movement engine keys all costs to locomotion type, not unit name.
+- **Vegetation is two hex attributes:** `has_light_vegetation` and `has_heavy_vegetation`. Both block LOS into-but-not-through. Give stealth bonus (+1/+3) to all units in hex.
+- **Urban is a hex attribute:** `has_urban`. Settlements (`has_settlement`) are major cities that count toward win condition and start with a Manufacturing Facility.
+- **Buildings have HP:** Airstrip, Airbase, Harbor, Manufacturing Facility, Bridge all have HP. Damaged = reduced output. Destroyed = non-functional. Tag stays on hex.
+- **No coast or river terrain types:** Coastal = adjacency to Water. Rivers = Water hexes going inland.
+- **Tag system:** Units have multiple tags (ground/mobile/armored/heavy/naval/air/stealth + stubs). Tags are player-facing descriptors + cost indicators + drive engine rules. More tags = higher cost.
+- **Naval units use HP not quantity stacks.** Fewer, tankier individual ships. Repaired at Harbors.
+- **Production chain:** Manufacturing Facility produces all units. Adjacent Airbase required for air units. Adjacent Harbor required for naval units. Produced units spawn at the adjacent building (or nearby Carrier for air).
+- **Resources from specific tiles:** Fixed resource tiles placed by GM (mines, cities). No development multiplier. Terrain type does not produce resources directly.
 - **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.
-- **Supply system:** Stubbed. No supply penalty currently applied. Future: radius-based from urban hubs + Supply unit coverage.
-- **Combat:** 2d6 bell curve per stack, simultaneous volleys, save rolls per hit, penetration stat on units. See DESIGN.md.
-- **Terrain movement costs:** Derived from locomotion type + terrain base cost + attribute overlays. No separate lookup table — two extra columns on terrain_type_config (armor_extra_cost, etc.) are sufficient.
-- **Turn advance order:** Phase 1 Air → Phase 2 Naval → Phase 3 Ground (+ naval bombardment + air-to-ground) → Phase 4 Collect.
+- **Supply system:** Stubbed. Supply units build remote infrastructure (bridges, airstrips, canals). Future: supply lines.
+- **Combat:** 2d6 bell curve, simultaneous volleys, save rolls per hit, penetration stat. See DESIGN.md.
+- **Terrain movement costs:** Derived from tag type + terrain base cost + attribute overlays. No separate lookup table.
+- **Turn advance order:** Phase 1 Air → Phase 2 Naval → Phase 3 Ground → Phase 4 Collect.
 - **Finish turn:** Player-driven. All players ready → auto-advance. GM can force.
-- **Flight group system:** Air actions use flight groups (X fighters + Y bombers). Player designates path; system validates round-trip range. AA fires before patrol intercepts in Phase 1.
-- **AA Gun:** Fires at ground (attack 2, pen 1, range 1) AND at air via Overwatch Skies ability (attack 4, pen 0, range 2, max 3 flight groups per turn).
+- **Flight group system:** Air actions use flight groups. AA fires before patrol intercepts. Stealth groups require detection roll before AA/intercept can engage.
+- **Stealth and detection:** Universal system. Units in open = auto-detected. Units in cover get terrain stealth bonus. Stealth-tagged units always need detection roll. Formula: threshold = 7 + distance + effective_stealth − effective_detection. Roll 2d6 ≥ threshold. Cannot target undetected units.
+- **Win condition:** Hold 2/3 of `has_settlement` hexes at end of turn. Tunable per player count.
+- **Wetlands:** No naval without `has_canal`. Supply units dig canals.
 
 ## Schema
 
