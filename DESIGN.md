@@ -14,78 +14,76 @@ Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval
 
 ## Turn Resolution
 
-All phases resolve automatically when all players click Finish Turn (or GM force-advances). Each phase is fully simultaneous — all unit actions within a phase happen at once, not in sequence. Casualties and state changes within a phase are applied after all volleys in that phase complete.
+All phases resolve automatically when all players click Finish Turn (or GM force-advances). Within each phase, all actions of the same type resolve simultaneously — volleys from both sides are rolled, then casualties applied together.
 
 ---
 
 ### Phase 1 — Air
 
-1. **All flight groups commit.** Players' designated paths and mission types are locked. Patrol orders already standing from previous turns remain active.
-2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: identify every detected enemy flight group whose path passes within overwatch range this turn. Each AA unit rolls once per flight group. Stealth groups require a detection roll before AA can engage — undetected groups pass through silently. Multiple AA units fire independently; a flight group can take fire from several AA units along its path.
-3. **Patrol intercepts.** For each patrolling fighter/scout unit: identify every detected enemy flight group entering the patrol area. Intercept combat sequence per group:
-   a. Escort fighters vs patrol fighters (simultaneous fire, casualties applied)
-   b. Surviving patrol fighters engage bombers (one more volley)
-   c. Surviving bombers continue toward target
-   Multiple patrol zones = multiple separate intercept combats in path order.
-4. **Casualties from Phase 1 applied.** AA hits and intercept casualties are resolved; destroyed aircraft are removed.
-5. **Surviving bombers note targets** for execution in Phase 3.
+1. **All flight groups commit.** Paths and mission types locked. Standing patrol orders from previous turns remain active.
+2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: fire once at each detected enemy flight group whose path passes within overwatch range. Stealth groups require a detection roll first — undetected groups pass through silently. Multiple AA units fire independently.
+3. **Patrol intercepts.** For each detected enemy flight group entering a patrol area: one combined battle involving all fighters and bombers present on both sides simultaneously. Escorts, patrol fighters, and bombers all roll at the same time — there is no sequential escort-first-then-bombers sequence. Casualties applied after all volleys. Multiple patrol zones = multiple separate battles in path order.
+4. **Casualties applied.** AA hits and intercept casualties resolved; destroyed aircraft removed.
+5. **Surviving bombers note strike targets** for Phase 3.
 
 ---
 
 ### Phase 2 — Naval
 
-1. **All naval units execute movement orders simultaneously.** Ships travel to their final destination hexes. Units do not fight in intermediate hexes — only at final positions.
-2. **Detection rolls.** Destroyers and surface ships attempt to detect submarines within sonar range. Submarines attempt to detect surface ships. Detection_score computed; rolls made. Undetected units cannot be targeted this phase.
-3. **Contested naval hexes identified.** Any hex containing ships from factions at war → combat triggers.
-4. **Naval combat resolves.** All contested naval hexes fight simultaneously. Both sides roll simultaneously; HP damage applied after all volleys. Submarines that were detected can participate.
+Naval movement is path-based, not jump-to-destination. Ships process their movement one step at a time, and contact with enemies interrupts movement mid-path.
+
+1. **Naval units begin movement.** Ships step through their movement paths one hex at a time.
+2. **Contact check per step.** After each hex moved, check: is this ship now in the same hex as, or adjacent to, any enemy ship? If yes → stop, fight, then continue with remaining movement points.
+3. **Detection rolls (per engagement).** Before each naval combat, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
+4. **Naval combat resolves.** All ships present (both sides, all factions at war) roll simultaneously. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. All HP damage applied after volleys.
 5. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
-6. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
+6. **Movement continues.** Surviving ships resume remaining movement points. Steps 2–5 repeat if further contacts occur.
+7. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
 
 ---
 
 ### Phase 3 — Ground
 
-1. **All ground units execute movement orders simultaneously.**
-   - Supply trucks on build orders (road, canal, airstrip, bridge) do not move — they execute their build action in place.
-   - Transport planes execute cargo delivery missions.
+1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead.
 2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
-3. **All combat and bombardment resolves simultaneously** — every action in Phase 3 fires at the same moment:
+3. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
-   - **Artillery bombardment:** all stationary artillery fire at designated target hexes.
-   - **Naval bombardment:** all validated Battleship bombard orders fire at designated land hexes.
-   - **Air-to-ground strikes:** surviving bombers from Phase 1 execute Bombing Run or Attack Run orders.
-   - All hits from all sources are pooled; casualties and HP damage are applied after every volley completes.
-4. **Bombardment is indiscriminate.** Unit-targeting rolls hit all units in the target hex — friendly, enemy, and allied alike.
-5. **Building and infrastructure damage assessed.** Infra hits from bombardment applied: HP buildings lose HP, no-HP infra flagged damaged/destroyed.
-6. **Hex capture.** Any hex where exactly one faction's ground units remain → that faction captures the hex. Hex ownership updated. Buildings and infrastructure transfer to new owner in current state.
+   - **Artillery bombardment:** stationary artillery fire at designated target hexes.
+   - **Naval bombardment:** Battleships with validated bombard orders fire at designated land hexes.
+   - **Air-to-ground strikes:** surviving bombers from Phase 1 execute Bombing Run or Attack Run orders against land targets.
+   - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
+4. **Bombardment is indiscriminate.** All units in a targeted hex — friendly, enemy, and allied — are eligible targets. Players take responsibility for bombing contested hexes.
+5. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
+6. **Hex capture.** Any hex where exactly one faction's ground units remain → that faction captures the hex. Buildings and infrastructure transfer to new owner in current state.
 
 ---
 
 ### Phase 4 — Return and Collect
 
-1. **Air units fly home.** All flight groups return to nearest friendly landing site (airbase, airstrip, carrier at its current position after Phase 2 movement).
+1. **Air units fly home.** All flight groups return to nearest friendly landing site (airbase, airstrip, or carrier at its current position after Phase 2).
    - If planned landing site was captured or destroyed: reroute to nearest alternative within remaining movement range.
-   - Carrier-based units whose carrier sunk: find alternative landing site or crash.
-   - Units with no reachable friendly landing site → crash and are destroyed.
-2. **Manpower calculated.** Flood-fill from each owned `has_settlement` hex through contiguous `has_urban` tiles. Total = this turn's manpower budget. Damaged urban tiles produce nothing.
-3. **Materials collected.** +1 per owned resource tile.
-4. **Manpower allocated** (player specified this at order-setting time; system now deducts):
-   - Building construction progress: HP added to all buildings with committed construction this turn.
-   - Production reservations honored: manpower deducted for queued units. If actual manpower falls short of all reservations (e.g. a settlement was captured this turn), production orders are cancelled and materials refunded.
-   - Road/canal construction: manpower deducted for supply truck build actions that completed in Phase 3. Shortfall = construction not completed, truck action wasted (no partial roads).
-   - Unused manpower → wasted.
-5. **Buildings that reached max HP** transition from `under_construction` to `operational`.
-6. **Production queue advances.** All `pending` orders → `ready`. Units will be available to place at the next production panel.
-7. **Win condition check.** Count `has_settlement` hexes per faction. Any faction holding ≥ 2/3 of all settlements → wins.
-8. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
+   - Carrier-based units whose carrier sunk: find alternative or crash.
+   - Units with no reachable landing site → crash and are destroyed.
+2. **Materials collected.** +1 per owned resource tile.
+3. **Production queue advances.** All `pending` orders → `ready`. Units available to place at start of next turn.
+4. **Manpower calculated and held.** Flood-fill from each owned `has_settlement` hex through contiguous `has_urban` tiles. Total = manpower budget available to spend at the start of the next turn. Damaged urban tiles produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
+5. **Win condition check.** Count `has_settlement` hexes per faction. Any faction holding ≥ 2/3 of all settlements → wins.
+6. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
 
 ---
 
-**Between turns (player portal):**
-1. Players review combat reports and battle log filtered through their fog of war.
-2. **Production panel** — place all `ready` units at their spawn locations (Manufacturing Facility for ground, Airbase for air, Harbor for naval). Queue new production and pay materials immediately from stockpile.
-3. Set orders for the new turn (movement, bombardment, flight groups, patrol, build orders, etc.).
-4. Click Finish Turn when ready.
+### Between Turns — Player Orders Phase
+
+This is where manpower from Phase 4 is spent. Players act in any order; the turn does not advance until all are ready.
+
+1. **Review** combat reports and battle log, filtered through fog of war.
+2. **Production panel:**
+   - Place all `ready` units at spawn locations (ground → Manufacturing Facility, air → Airbase, naval → Harbor).
+   - Queue new production: pay materials from stockpile + manpower from this turn's budget now.
+3. **Building construction:** allocate mat + manpower toward any buildings under construction. HP credited immediately. Materials deducted from stockpile, manpower deducted from budget.
+4. **Set orders:** movement, bombardment, flight groups, patrol, supply truck build actions (road, canal, airstrip, bridge — earmark manpower for these now).
+5. Any manpower not allocated before clicking Finish Turn is wasted.
+6. **Click Finish Turn.** When all players ready → next turn's phases execute.
 
 ---
 
