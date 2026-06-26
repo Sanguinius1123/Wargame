@@ -517,14 +517,14 @@ Ground:
 
 Air:
 
-| Unit | To-Hit | Def To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | **5** | 0 | 8 | 5 | 1 | 4 | 1 |
-| Scout Plane | — | — | **4** | 0 | 10 | 6 | — | 3 | 1 |
-| Bomber | 6 | 10 | **4** | 0 | 7 | 5 | 1 | 5 | 1 |
-| Transport Plane | — | — | **3** | 0 | 6 | 3 | — | 3 | 1 |
+| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Fighter | 7 | — | 7 | 0 | — | 8 | 5 | 1 | 4 | 1 |
+| Scout Plane | — | — | 6 | 0 | — | 10 | 6 | — | 3 | 1 |
+| Bomber | 6 | 10 | 6 | 0 | 3 | 7 | 5 | 1 | 5 | 1 |
+| Transport Plane | — | — | 3 | 0 | — | 6 | 3 | — | 3 | 1 |
 
-`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills).
+`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills). Bombers use HP (3 per aircraft) rather than quantity stacks — repaired at Airbase.
 
 Naval (HP-based; attack dice per ship):
 
