@@ -26,16 +26,22 @@ Full game design: `DESIGN.md`
 - **Movement orders:** Queued in `movement_orders` with `turn` + `sequence` fields. Multi-turn paths supported. Executed at turn advance in sequence order.
 - **Fog of war (computed):** Server computes visibility at query time using `computeVisibility()` in `server/src/utils/visibility.js`. Three states: visible / scouted / dark. Scouted hexes persisted in `scouted_hexes`.
 - **Allied vision:** Table exists (`allied_vision`), always disabled. Stub only.
-- **Air units:** Schema stub only. `is_stub=TRUE` in unit_type_config. Not implemented. Will require `has_airstrip` hex attribute when built.
+- **Air units:** Fighter + Bomber implemented as flight groups (not individual unit orders). `is_stub=TRUE` in unit_type_config until air system is built.
 - **Registration:** REGISTRATION_CODE env var required for all signups. gm_whitelist only controls role assignment (same pattern as ScifiRNR).
-- **Forest is a hex attribute:** `has_forest BOOLEAN` on hexes, not a terrain type. Forested hills/mountains are valid. Forest blocks LOS and adds move cost penalty.
-- **Airstrip is a hex attribute:** `has_airstrip BOOLEAN` on hexes. Any terrain can have an airstrip.
+- **Vegetation is two hex attributes:** `has_light_vegetation` (no move penalty for foot, +2 for mechanized) and `has_heavy_vegetation` (+2 for foot, impassable for mechanized). Both block LOS into-but-not-through.
+- **Urban is a hex attribute:** `has_urban BOOLEAN`, not a terrain type. Overlays any terrain. Grants production/manpower + defense bonus.
+- **Airstrip is a hex attribute:** `has_airstrip BOOLEAN`. Any terrain can have an airstrip.
+- **No coast or river terrain types:** "Coastal" is implicit from adjacency to Water. Rivers are Water hexes going inland.
+- **Locomotion types replace categories:** Units have a `locomotion` field (foot / mechanized / naval / air / hover / orbital / space / subterranean). Movement engine keys all costs to locomotion type, not unit name.
+- **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.
 - **Supply system:** Stubbed. No supply penalty currently applied. Future: radius-based from urban hubs + Supply unit coverage.
 - **Combat:** 2d6 bell curve per stack, simultaneous volleys, save rolls per hit, penetration stat on units. See DESIGN.md.
-- **Terrain movement costs:** Per-unit-type costs in `terrain_movement_costs` table. Formula: `max(1, floor(unit.movement / terrain_cost))`.
-- **Turn advance order:** movement → combat → production → resource collection → reset turn_ready.
+- **Terrain movement costs:** Derived from locomotion type + terrain base cost + attribute overlays. No separate lookup table — two extra columns on terrain_type_config (armor_extra_cost, etc.) are sufficient.
+- **Turn advance order:** Phase 1 Air → Phase 2 Naval → Phase 3 Ground (+ naval bombardment + air-to-ground) → Phase 4 Collect.
 - **Finish turn:** Player-driven. All players ready → auto-advance. GM can force.
+- **Flight group system:** Air actions use flight groups (X fighters + Y bombers). Player designates path; system validates round-trip range. AA fires before patrol intercepts in Phase 1.
+- **AA Gun:** Fires at ground (attack 2, pen 1, range 1) AND at air via Overwatch Skies ability (attack 4, pen 0, range 2, max 3 flight groups per turn).
 
 ## Schema
 
@@ -47,11 +53,14 @@ supabase/migrations/
   004_factions_and_units.sql  — factions, units, movement_orders, RLS
   005_fog.sql                 — scouted_hexes, allied_vision (stub), player hex RLS
   006_seed.sql                — 10×10 dev map with mixed terrain
-  007_additions.sql           — (NOT YET WRITTEN) terrain_movement_costs, combat_log,
-                                production_queue, faction_relationships, unit penetration,
-                                terrain combat_modifier + elevation, hex has_forest +
-                                has_airstrip, movement_orders sequence + order_type,
-                                game_participants turn_ready, units standing_order
+  007_additions.sql           — (NOT YET WRITTEN) combat_log, production_queue,
+                                faction_relationships, flight_groups, unit penetration +
+                                def_attack + locomotion, terrain combat_modifier + elevation +
+                                armor_extra_cost, hex has_light_vegetation + has_heavy_vegetation +
+                                has_urban + has_airstrip + has_bridge, movement_orders
+                                sequence + order_type, game_participants turn_ready,
+                                units standing_order, terrain types updated (remove coast/river/
+                                forest/urban, add hills/desert/wetlands, rename sea→water)
 ```
 
 ## Key Server Routes

@@ -1,159 +1,220 @@
 # Wargame — Design Document
 
-Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval warfare, fog of war, async multiplayer via web portal.
+Setting-agnostic hex-based operational wargame. Planet-scale map, ground + naval + air warfare, fog of war, async multiplayer via web portal.
 
 ---
 
 ## Core Loop
 
-1. **Orders** — players queue movement, combat, production, and standing orders
-2. **Resolve** — turn advances: movement executes, combat resolves, production spawns units, resources collected
-3. **Report** — players see results (casualties, territory changes) filtered through fog of war
+1. **Orders** — players queue movement, combat, production, patrol, and flight group orders
+2. **Resolve** — turn advances through four phases
+3. **Report** — players see results filtered through fog of war
 
-**Turn advance order (server-side):**
-1. Apply movement orders (crossing detection first)
-2. Resolve combat on contested hexes
-3. Process production queue (spawn units at facilities)
-4. Collect resources from owned hexes
-5. Reset `turn_ready` for all players, increment turn counter
+---
+
+## Turn Resolution
+
+**Phase 1 — Air**
+1. All flight groups move along designated paths (paths recorded for LOS + intercept)
+2. AA Overwatch fires at each flight group whose path passed through coverage zones
+3. Patrol intercepts engage each flight group whose path passed through patrol areas
+4. Surviving bombers carry strike orders into Phase 3
+
+**Phase 2 — Naval**
+- Naval units fight each other in contested hexes
+
+**Phase 3 — Ground**
+- Ground units fight in contested hexes
+- Naval bombardment resolves (Battleship + Destroyer strikes against land targets)
+- Air-to-ground strikes resolve (surviving bombers from Phase 1 execute against designated targets)
+
+**Phase 4 — Collect**
+- Resources collected from owned hexes
+- Production queue advances; completed units spawn at facilities
+- `turn_ready` reset for all players, turn counter increments
 
 ---
 
 ## Finish Turn
 
 - Each player has a **Finish Turn** button on their portal
-- Clicking it marks them `turn_ready = true`
-- When ALL active player participants are ready → turn auto-advances
-- GM has a Finish Turn button that **force-advances** regardless of player readiness
-- GM portal shows a list of all players and their ready status
+- Clicking marks them `turn_ready = true`
+- All active players ready → turn auto-advances
+- GM can force-advance regardless of player readiness
+- GM portal shows all players and their ready status
 
 ---
 
 ## Map
 
-Hex grid, pointy-top axial coordinates (`hex_q`, `hex_r`). Planet-scale = hundreds to thousands of hexes per game.
-
 ### Terrain Types
 
-Terrain determines base movement cost (via `terrain_movement_costs` table), resource output, LOS blocking, elevation, and combat modifiers.
-
-| Terrain | Elevation | Combat Modifier | Defense Bonus* | Blocks LOS | Production | Manpower |
+| Terrain | Elevation | Combat Mod | Def Bonus* | Blocks LOS† | Production | Manpower |
 |---|---|---|---|---|---|---|
 | Plains | 0 | 0 | 0 | No | 1 | 1 |
 | Hills | 1 | +1 | +1 | No | 0 | 0 |
 | Mountains | 2 | +2 | +1 | Yes | 0 | 0 |
-| Coast | 0 | 0 | 0 | No | 1 | 1 |
-| Sea | 0 | 0 | 0 | No | 0 | 0 |
-| Urban | 0 | 0 | +3 | No | 3 | 2 |
-| River | 0 | -1 | 0 | No | 0 | 0 |
+| Desert | 0 | 0 | 0 | No | 0 | 0 |
 | Wetlands | 0 | -1 | 0 | No | 0 | 0 |
+| Water | 0 | 0 | 0 | No | 0 | 0 |
 
-*Defense bonus only applies to units that **did not move** this turn (defend, wait, or idle orders).
+*Defense bonus only applies to units that did not move this turn (defend, wait, or idle orders).
 
-**Combat Modifier** applies to all units fighting FROM that hex, attack or defense. High ground helps regardless of whether you're attacking or defending.
+†Blocking hexes are **visible** — you can see INTO them, not THROUGH them to hexes beyond.
+
+**Notes:**
+- "Coastal" is not a terrain type. Any land hex adjacent to a Water hex is implicitly coastal for naval landing and bombardment purposes.
+- Rivers are Water hexes going inland — same terrain type, same rules. Ground units cannot cross without a bridge or Transport.
+- Urban areas are the `has_urban` hex attribute, not a terrain type. Urban overlays any terrain.
 
 ### Hex Attributes
 
-Two boolean attributes can overlay any terrain type:
+| Attribute | Description |
+|---|---|
+| `has_light_vegetation` | Blocks LOS†. No move penalty for foot; +2 cost for mechanized. Minor defense modifier for stationary defenders. |
+| `has_heavy_vegetation` | Blocks LOS†. +2 move cost for foot; impassable for mechanized. Defense modifier for stationary defenders. |
+| `has_urban` | Production/manpower output. +3 defense bonus for stationary units. +1 move cost for mechanized (tight streets). |
+| `has_airstrip` | Air units must start and end every turn here. Cannot land elsewhere. |
+| `has_bridge` | Foot and mechanized units may cross this Water hex at extra movement cost. |
 
-- **`has_forest`** — Forest is a hex attribute, not a terrain type. A forested mountain or forested hill is valid. Forest:
-  - Blocks LOS
-  - Adds movement cost penalty on top of base terrain cost (ground units; amount varies by unit type — infantry are nimble in forests, armor is heavily penalized)
-  - Adds minor combat modifier for defenders (cover)
+†The attribute hex itself is visible. Hexes behind it (from the viewer's perspective) are not.
 
-- **`has_airstrip`** — An airstrip facility on this hex. Aircraft must end every turn on a hex with an airstrip. Any terrain type can have an airstrip.
+### Elevation and LOS
 
-### Elevation and Artillery Range
+Units standing on elevated terrain see further:
 
-`elevation` on terrain type determines artillery bonus range:
-- Plains/Coast/Sea/Urban/River/Wetlands: elevation 0
-- Hills: elevation 1
-- Mountains: elevation 2
+| Terrain | Elevation | LOS bonus |
+|---|---|---|
+| Plains / Desert / Wetlands / Water | 0 | +0 |
+| Hills | 1 | +1 |
+| Mountains | 2 | +2 |
 
-**Effective artillery range** = `base_range + max(0, firer_elevation − target_elevation)`
-
-- Firing down from a mountain to plains: base_range + 2 bonus
-- Firing from mountain to mountain: base_range + 0 (no relative advantage)
-- Firing up from plains to mountains: base_range + 0 (**no penalty** — artillery lobs shots; it just loses the height bonus)
-- Artillery can fire OVER intervening terrain (indirect arc). Mountains between firer and target do **not** block the shot — only LOS.
+**Artillery range bonus from elevation:** `effective_range = base_range + max(0, firer_elevation − target_elevation)`. Artillery fires in an arc — terrain between firer and target does not block the shot; only LOS matters for spotting.
 
 ### Hex Ownership
 
-A hex is owned by whichever faction last controlled it. Capturing = have units there with no enemy units at end of combat phase. Owning a hex at end of turn collects its resources.
+A hex is owned by whichever faction last controlled it. Capturing = have units there with no enemy units at end of Phase 3. Owned hexes generate resources in Phase 4.
+
+---
+
+## Locomotion Types
+
+Every unit has a locomotion type. The movement engine keys all terrain cost and accessibility rules to locomotion type — not to specific unit names. A different game/setting can introduce any unit roster using these types with no engine changes.
+
+| Locomotion | Description | Current Units | Stub |
+|---|---|---|---|
+| `foot` | Infantry on foot | Infantry, Artillery, AA Gun | No |
+| `mechanized` | Wheeled/tracked ground | Armor, Supply | No |
+| `naval` | Surface water travel | Destroyer, Battleship, Transport | No |
+| `air` | Atmospheric flight; must land on airstrip | Fighter, Bomber | No |
+| `hover` | Low-altitude hover; ignores ground terrain costs | — | Yes |
+| `orbital` | In orbit over a planetary body | — | Yes |
+| `space` | Deep space travel | — | Yes |
+| `subterranean` | Underground movement | — | Yes |
+
+`unit_type_config` is scoped per game — each game/ruleset defines its own unit roster with its own stats. Not global.
 
 ---
 
 ## Movement
 
-### Movement Points
+### Terrain Costs by Locomotion Type
 
-Each unit has a `movement` stat = total movement points per turn.
+| Terrain | foot | mechanized | naval | air | hover |
+|---|---|---|---|---|---|
+| Plains | 1 | 1 | impassable | passable | passable |
+| Hills | 2 | 2 | impassable | passable | passable |
+| Mountains | 2 | 4 | impassable | passable | passable |
+| Desert | 2 | 1 | impassable | passable | passable |
+| Wetlands | 2 | 4 | 1 | passable | passable |
+| Water | impassable | impassable | 1 | passable | passable |
+| Water + `has_bridge` | 2 | 3 | 1 | passable | passable |
 
-### Terrain Movement Costs (per unit type)
+**Desert asymmetry:** foot pays 2 (heat, no roads, exhausting march); mechanized pays 1 (flat, open — ideal tank terrain).
 
-Stored in `terrain_movement_costs` table: `(terrain_name, unit_type_id, move_cost, impassable)`.
+### Hex Attribute Movement Effects
 
-Movement formula: `hexes_in_terrain = max(1, floor(unit.movement / terrain_cost))`
-
-Example results with Infantry (mv=2) and Armor (mv=4):
-
-| Terrain | Infantry cost | Armor cost | Infantry hexes | Armor hexes |
+| Attribute | foot | mechanized | naval | air / hover |
 |---|---|---|---|---|
-| Plains | 1 | 1 | 2 | 4 |
-| Hills | 2 | 2 | 1 | 2 |
-| Mountains | 2 | 4 | 1 | 1 |
-| Wetlands | 2 | 4 | 1 | 1 |
-| Coast | 1 | 1 | 2 | 4 |
-| Urban | 1 | 2 | 2 | 2 |
-| River | 2 | 2 | 1 | 2 |
-| Sea | impassable | impassable | — | — |
+| `has_light_vegetation` | +0 | +2 | no effect | no effect |
+| `has_heavy_vegetation` | +2 | impassable | no effect | no effect |
+| `has_urban` | +0 | +1 | no effect | no effect |
+| `has_airstrip` | no effect | no effect | no effect | required to land |
+| `has_bridge` | enables Water crossing | enables Water crossing | no extra cost | no effect |
 
-**Forest attribute** adds an additional move cost penalty on top of terrain base:
-- Infantry in forested terrain: cost +0 (infantry is nimble in forests — same base cost)
-- Armor in forested terrain: cost +2 or +3 (heavily penalized)
-- Naval: forests are irrelevant (sea hexes)
+Attribute costs stack on top of base terrain cost (e.g., mechanized in forested hills = 2 base + 2 vegetation = 4).
 
-Naval units (Destroyer mv=5, Battleship mv=4, Transport mv=4) can only enter Sea, Coast, and River hexes. Land is impassable.
+### Naval Landing
 
-Air units ignore terrain movement costs entirely but must start and end each turn on a hex with `has_airstrip = true`.
+Naval units cannot enter land hexes. Transport units offload ground troops: a Transport adjacent to a land hex can transfer ground units into that hex (costs the ground unit 1 movement).
 
-### Queued Orders
+### Air Movement
 
-Players can queue movement orders for multiple future turns. These are stored with a `turn` and `sequence` field, allowing a unit to have a pre-planned multi-turn path. Orders for future turns execute automatically when those turns arrive.
+Air units ignore terrain movement costs entirely. Each air unit must start and end every turn on a hex with `has_airstrip`. Air units provide LOS for **every hex along their flight path**, not just their destination. Only surviving units contribute LOS.
 
-**Enemy spotted clearing** (future): if a unit's queued path passes through a hex where an enemy is detected at turn advance, the queue may be auto-cleared with a flag shown to the player.
+---
+
+## Flight Groups
+
+The fundamental unit of air action. Players compose flight groups; individual unit orders are not used for air.
+
+**Composition:** any number of fighters (escort) + any number of bombers (strike). Fighter-only groups are valid for scouting, patrol sweeps, and LOS missions.
+
+**Mission types:**
+
+| Mission | Units | Effect |
+|---|---|---|
+| Strike | Bombers (+ optional escort fighters) | Bombers attack designated target hex in Phase 3 |
+| Scout | Fighters only | Fly path to gather LOS; no attack |
+| Sweep | Fighters only | Clear patrol fighters from a path; no bombing |
+
+**Path planning:** Player designates a waypoint route. System validates that every unit in the group has enough movement for the full round trip: outbound path + distance from target to nearest friendly airstrip. If any unit falls short, the plan is rejected.
+
+Return to airstrip is automatic — after executing the mission, surviving units fly to the nearest valid friendly airstrip. Player only plans the outbound path.
+
+**Attrition and reporting:** A flight group entirely destroyed reports nothing — no LOS, no battle report. Only groups with surviving members provide LOS of hexes they passed through.
+
+**Future:** Turn-around rules — player designates a casualty threshold at which the group aborts the mission and returns to base if sufficient movement remains.
+
+---
+
+## Patrol
+
+Standing order for fighters. A patrolling fighter stays in its designated hex and intercepts any enemy flight group whose path enters the patrol area.
+
+**Patrol area:** all hexes within X hexes of the patrol hex (range TBD — 1 or 2, pending balance testing).
+
+**Patrol persists** turn to turn (like Defend for ground units). A patrolling fighter cannot move that turn.
+
+---
+
+## Air Phase Resolution (Phase 1 Detail)
+
+All events resolve simultaneously based on committed paths — not sequentially along the path.
+
+1. **All flight groups commit** to their paths (simultaneous)
+2. **AA Overwatch fires** at each flight group whose path passed through any AA coverage zone (range 2). Each AA unit fires at a maximum of **3 different flight groups per turn**. The 3-shot cap resets each turn. Multiple AA units in overlapping zones each fire independently.
+3. **Patrol intercepts** engage each flight group whose path passed through the patrol area. If a path crosses multiple patrol areas, a separate intercept combat resolves in each.
+4. **Surviving bombers** carry strike orders into Phase 3
+
+**AA fires before patrol intercepts.** Flight groups may be weakened by flak before fighters engage them.
+
+**Bombers that survive** any number of intercepts continue to their target.
 
 ---
 
 ## Orders
 
-Units can be given the following orders each turn:
-
-| Order | Description | Notes |
+| Order | Units | Description |
 |---|---|---|
-| **Move** | Queue movement to a destination hex | Can chain multiple turns |
-| **Defend** | Standing order, persists turn to turn | Unit gets terrain defense_bonus; never appears in "needs orders" list |
-| **Wait** | Skip this turn only | Clears from needs-orders list; unit gets defense_bonus this turn |
-| **Bombard** | Artillery/Battleship zone attack | Target hex, stationary required (except Battleship) |
-| **Skirmish Hold** *(stub)* | Harass without committing | Reduced outgoing damage; no advance even if enemy wiped |
-| **Skirmish Retreat** *(stub)* | Fire then fall back | Retreat to designated hex after exchange; attacker cannot advance |
-
-### Skirmish (stub — not yet implemented)
-
-A unit in **Skirmish** mode is delaying, not holding. It does not receive a defense bonus.
-
-Two sub-modes, set when issuing the order:
-
-**Skirmish Hold (attack tile designated):**
-- Fights but deals reduced outgoing damage (partial engagement)
-- Takes **reduced** incoming damage — UNLESS enemy physically moves into the unit's hex (direct assault = full damage)
-- If enemy is wiped out, skirmisher stays in own hex regardless — does not advance
-- After battle: stays put
-
-**Skirmish Retreat (retreat tile designated):**
-- Fires one exchange, then retreats to the designated tile if not wiped out
-- The attacker **cannot advance** this turn even if they "won" — they are held at their origin hex
-- Primary use: delaying enemy advance while preserving the unit
+| **Move** | ground, naval | Queue movement to destination. Multi-turn paths supported. |
+| **Defend** | ground, naval | Standing order. Terrain defense_bonus applies. Never appears in needs-orders list. |
+| **Wait** | ground, naval | Skip this turn only. Defense_bonus applies. Resets next turn. |
+| **Bombard** | Artillery, Battleship | Attack target hex at range. Artillery must be stationary. Battleship can move and bombard same turn. |
+| **Patrol** | Fighter | Standing order. Stay in hex; intercept enemy air entering patrol area. |
+| **Flight Group** | Fighter, Bomber | Compose group, designate path and mission type. |
+| **Skirmish Hold** *(stub)* | ground | Reduced outgoing damage; no advance even if enemy wiped. |
+| **Skirmish Retreat** *(stub)* | ground | Fire one exchange then fall back to designated hex. |
 
 ---
 
@@ -161,215 +222,180 @@ Two sub-modes, set when issuing the order:
 
 ### Domain Separation
 
-- Ground units fight ground units only
-- Naval units fight naval units only
-- No cross-domain melee (Battleship can't fight Infantry directly)
-- **Exception:** Artillery (ground) and Battleship (naval) can bombard across domains via bombardment orders
+| Attacker | Can target | Phase |
+|---|---|---|
+| foot / mechanized | ground only | 3 |
+| naval | naval only | 2 |
+| air fighter | air (intercept) | 1 |
+| air bomber | ground + naval (strike) | 3 |
+| AA Gun (ground attack) | ground only | 3 |
+| AA Gun (Overwatch Skies) | air only | 1 |
+
+### AA Gun — Overwatch Skies
+
+AA Gun has two combat modes:
+
+| Mode | Trigger | Attack | Pen | Range |
+|---|---|---|---|---|
+| Ground combat | Phase 3 normal engagement | 2 | 1 | 1 |
+| Overwatch Skies | Phase 1, flight group in range | 4 | 0 | 2 |
+
+Pen 0 vs air is sufficient — planes have Defense 0, saves are near-impossible regardless.
 
 ### Terrain in Combat
 
-Two terrain values affect combat:
-
-1. **`combat_modifier`** — always applies to your side's combat strength when fighting FROM that hex, regardless of attack or defense. High ground (mountains +2) benefits attacker and defender equally. Wetlands/river (-1) penalizes your forces regardless of role.
-
-2. **`defense_bonus`** — ONLY applies to units that **did not move this turn** (defend, wait, or idle). A unit in a city that attacks out of it loses the city defense bonus. The unit LEAVING is the attacker and gets no fortification benefit.
+1. **`combat_modifier`** — applies to all units fighting FROM that hex, attack or defense. High ground benefits attacker and defender equally.
+2. **`defense_bonus`** — only for units that did not move this turn (defend, wait, or idle). Stacks from terrain + `has_urban`.
 
 ### Combat Formula (Simultaneous Volleys)
 
-All unit stacks on all sides fire simultaneously. Each stack rolls independently:
-
 ```
-roll       = d6 + d6                           // 2–12, peaks at 7 (bell curve)
-multiplier = roll / 7                          // 0.29 to 1.71, average 1.0
-raw_hits   = floor((attack + terrain.combat_modifier) × qty × multiplier)
+roll       = d6 + d6                              // 2–12, bell curve peaking at 7
+multiplier = roll / 7                             // 0.29 to 1.71, average 1.0
+raw_hits   = floor((attack + combat_modifier) × qty × multiplier)
 ```
 
-For each raw hit, the **target unit stack** rolls a save:
+Per raw hit, target rolls a save:
 
 ```
-save_threshold = 11 − target.defense − terrain.defense_bonus(if_stationary) + attacker.penetration
-// defender rolls 2d6; if ≥ save_threshold → hit negated
-// if < save_threshold → 1 casualty applied to target stack
+save_threshold = 11 − target.defense − defense_bonus(if_stationary) + attacker.penetration
+// roll 2d6 ≥ threshold → hit negated
+// roll 2d6 < threshold → 1 casualty
 ```
 
-Casualties are applied weakest-unit-first on the target side. Both sides take casualties simultaneously (fire resolves before anyone is removed).
+Casualties applied weakest-unit-first. Both sides fire before anyone is removed.
 
-### Penetration Stat
+### Air Intercept Combat
 
-`penetration` on the attacker's unit type raises the defender's save threshold (makes saves harder):
-
-| Unit | Penetration | Effect vs Infantry (defense 2, threshold 9) |
+| Matchup | One side uses | Other side uses |
 |---|---|---|
-| Infantry | 0 | Infantry saves on 9+ (28%) |
-| Artillery | 1 | Infantry saves on 10+ (17%) |
-| Armor | 3 | Infantry saves on 12+ (3%) — nearly impossible |
-| Battleship | 2 | Infantry saves on 11+ (8%) |
+| Fighter vs Fighter | `attack` | `attack` (simultaneous) |
+| Fighter vs unescorted Bombers | `attack` | `def_attack` only |
+| Escort Fighters vs Patrol Fighters | `attack` | `attack` (fighters fight first) |
 
-### Unit Stats (current)
+After escort vs patrol resolves, surviving patrol fighters engage bombers using `def_attack`. Bombers that survive continue to target.
 
-| Unit | Attack | Defense | Penetration | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|
-| Infantry | 2 | 2 | 0 | 2 | 2 | 1 | 1 | 2 |
-| Armor | 4 | 4 | 3 | 4 | 3 | 1 | 3 | 1 |
-| Artillery | 5 | 1 | 1 | 2 | 2 | 4 | 4 | 1 |
-| Supply | 0 | 0 | 0 | 2 | 2 | 1 | 2 | 1 |
-| Destroyer | 3 | 2 | 1 | 5 | 4 | 1 | 3 | 1 |
-| Battleship | 6 | 4 | 2 | 4 | 4 | 3 | 6 | 2 |
-| Transport | 0 | 1 | 0 | 4 | 3 | 1 | 2 | 1 |
-| Fighter* | 3 | 2 | 0 | 8 | 6 | 1 | 4 | 1 |
-| Bomber* | 6 | 1 | 0 | 7 | 4 | 1 | 5 | 1 |
+### Unit Stats
 
-*Air units are stubs — not yet implemented. Aircraft must land on `has_airstrip` hex each turn.
+| Unit | Locomotion | Attack | Def Atk | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Infantry | foot | 2 | 0 | 2 | 0 | 2 | 3 | 1 | 1 | 2 |
+| Armor | mechanized | 4 | 0 | 4 | 3 | 4 | 3 | 1 | 3 | 1 |
+| Artillery | foot | 5 | 0 | 1 | 1 | 2 | 3 | 4 | 4 | 1 |
+| AA Gun | foot | 2 | 0 | 1 | 1 | 1 | 3 | 1 | 2 | 1 |
+| Supply | mechanized | 0 | 0 | 0 | 0 | 4 | 3 | 1 | 2 | 1 |
+| Destroyer | naval | 3 | 0 | 2 | 1 | 5 | 4 | 1 | 3 | 1 |
+| Battleship | naval | 6 | 0 | 4 | 2 | 4 | 4 | 3 | 6 | 2 |
+| Transport | naval | 0 | 0 | 1 | 0 | 4 | 4 | 1 | 2 | 1 |
+| Fighter | air | 3 | 0 | 0 | 0 | 8 | 5 | 1 | 4 | 1 |
+| Bomber | air | 6 | 1 | 0 | 0 | 7 | 5 | 1 | 5 | 1 |
+
+`Def Atk` = defensive attack value, used only when intercepted by fighters.
+AA Gun Overwatch Skies uses separate stats: attack 4, pen 0, range 2.
 
 ### Multi-Faction Combat
 
-When 3+ factions occupy the same hex, **simultaneous proportional fire** resolves it:
+3+ factions in same hex: each splits attack pool proportionally across all enemies. All fire simultaneously. Winner = last faction standing.
 
-- Each faction splits their total attack pool proportionally across all enemies (by enemy total quantity)
-- All factions fire simultaneously
-- All factions take casualties simultaneously
-- Winner = last faction standing in the hex
-
-**Faction relationships** (`faction_relationships` table):
-- `at_war` (default) — fight on sight
+**Faction relationships:**
+- `at_war` — fight on sight (default)
 - `allied` — share hexes, fight together as one side
-- `neutral` — cannot share hexes; movement into a neutral-occupied hex is blocked automatically. The moving unit stops at its origin. The player can change the relationship to `at_war` and attack next turn.
+- `neutral` — can't share hexes; movement into neutral-occupied hex blocked
 
-Two neutral factions both moving into the same empty hex: neither enters, both stop at origin.
+Two neutrals moving into same empty hex: neither enters.
 
 ### Movement and Combat Interaction
 
-**Crossing detection:** If unit A has destination = unit B's origin AND unit B has destination = unit A's origin, a **border battle** triggers:
+**Crossing detection:** Unit A's destination = unit B's origin AND vice versa → border battle. Neither moves. Combat resolves in starting hexes. Survivors may advance.
 
-1. Neither unit moves
-2. Combat resolves in place (using each unit's starting hex terrain)
-3. If one side is wiped out → survivors advance into the loser's original hex
-4. If both sides survive → both stay in their starting hex
-
-Units that moved this turn do NOT receive their terrain's `defense_bonus` (they were in motion).
+Units that moved this turn do NOT receive `defense_bonus`.
 
 ---
 
 ## Bombardment
 
-Artillery (ground) and Battleship (naval) can attack at range without entering the target hex.
+Artillery (ground) and Battleship (naval) attack at range without entering target hex.
 
-**Rules:**
-- Artillery must be **stationary** that turn to bombard (no move + fire)
-- Battleship **can move and bombard** in the same turn (naval mobility)
-- If a Battleship is engaged in naval combat that turn → bombardment is **cancelled**; it fights the naval engagement instead. Cannot do both.
-- Player designates a **target hex** when setting the order
-- At resolution: if enemy units are present in the target hex → they take hits (save rolls still apply)
-- If target hex is **empty** → shot wasted, no effect
-- **No return fire** to the bombardment unit — the bombarded units cannot fire back at range
+- Artillery must be stationary that turn to bombard
+- Battleship can move and bombard same turn; if engaged in naval combat → bombardment cancelled
+- No return fire from bombarded units
+- Empty target hex → shot wasted, no effect
 
-**Blind fire (LOS and range):**
-- Artillery can fire beyond its own LOS (`attack_range` > `los_range`)
-- If the firing unit OR any friendly unit has LOS to the target hex → player sees the battle result
-- If no friendly LOS to the target hex → shot resolves server-side but player gets **no report** — they don't know if there was anything there or how much damage was dealt
+**Blind fire:** If no friendly unit has LOS to target hex, shot resolves server-side but player receives no report.
 
 ---
 
 ## Fog of War
 
-Three visibility states per hex per faction:
+Three states per hex per faction:
 - **Visible** — currently in LOS of one of the faction's units
-- **Scouted** — previously seen, not currently visible (terrain shown, no current unit info)
+- **Scouted** — previously seen; terrain shown, no current unit info
 - **Dark** — never seen
 
-LOS is blocked by Mountains and `has_forest` hexes. Each unit type has a `los_range` (in hexes).
+LOS is blocked by Mountains, `has_light_vegetation`, and `has_heavy_vegetation`. The blocking hex is visible; hexes beyond it are not.
 
-### Combat Intel (Fog of War on Battle Reports)
+Air units provide LOS for every hex along their flight path, not just destination. Destroyed flight group members contribute no LOS.
 
-After combat resolves, players see battle reports filtered by LOS:
+### Combat Intel
 
 | Situation | Own Casualties | Enemy Casualties |
 |---|---|---|
-| Had LOS to the battle | Exact | Exact |
-| In the battle, no LOS | Exact | Estimated (±20–30%) |
+| Had LOS to battle | Exact | Exact |
+| In battle, no LOS | Exact | Estimated (±20–30%) |
 | Blind bombardment, no spotter | No report | No report |
+| Flight group entirely destroyed | — | No report |
 
 ---
 
 ## Production
 
-**Facilities** = any urban hex owned by the player's faction.
+Facilities = any hex with `has_urban` owned by the player's faction.
 
-Players can queue unit production at a facility by clicking it. Resources are **deducted immediately** at queue time to prevent double-spending. Units spawn at the facility hex during the production phase of turn advance.
+Resources deducted immediately at queue time (prevents double-spending). Units spawn at facility hex in Phase 4.
 
-Unit costs come from `unit_type_config.production_cost` and `manpower_cost`.
-
-`production_queue` table tracks: game, faction, target hex, unit type, quantity, turn queued, status (pending/cancelled/complete).
+`production_queue` table: game, faction, target hex, unit type, quantity, turn queued, status (pending/cancelled/complete).
 
 ---
 
 ## Supply (STUB — not yet implemented)
 
-Design intent (not built):
-- Units within `supply_radius` hexes of a friendly owned urban hex are **supplied** automatically
-- Units outside the radius need Supply units nearby (ratio: X Supply unit quantity per Y troop quantity)
-- Supply units are consumed each turn while covering cut-off forces
-- When supply runs out: cut-off troops take automatic attrition hits each turn
-
-Current behavior: supply is ignored entirely. No penalty for being "cut off."
+Design intent: units within supply radius of friendly owned urban hex are supplied. Supply units extend coverage. Cut-off units take attrition. Currently: no penalty for being cut off.
 
 ---
 
 ## Combat Log
 
-Every combat event is persisted to `combat_log` and `combat_log_participants`. Players can review what happened each turn. Enemy casualty information is filtered by LOS (see Combat Intel above).
-
----
-
-## Faction Relationships
-
-Stored in `faction_relationships` table:
-- `at_war` — default for all faction pairs
-- `allied` — share hexes, fight together
-- `neutral` — peaceful coexistence rules apply (can't share hexes)
-
-Relationships are symmetric. Allied vision sharing (`allied_vision` table) is stubbed — exists in schema, not wired.
+Every combat event persisted to `combat_log` and `combat_log_participants`. Players review turn results filtered by LOS.
 
 ---
 
 ## GM Portal
 
-Full map visibility. Can:
-- Edit any hex (terrain, development, owner)
-- Place or remove units
-- Adjust faction resources
-- Force-advance the turn regardless of player ready status
-- See turn status (which players have clicked Finish Turn)
+Full map visibility. Can edit hexes, place/remove units, adjust faction resources, force-advance turn, view turn status (which players have finished their turn).
 
 ---
 
 ## Player Portal — Left Panel
 
-Collapsible sidebar showing units that **need orders this turn**:
-- Unit stacks without any order set (move/defend/wait/bombard)
-- Owned urban hexes with no active production queue (facilities idle)
-- Units with `standing_order = 'defend'` are **never** shown (they have a standing order)
+Collapsible sidebar showing units that need orders:
+- Unit stacks with no order set
+- Owned urban hexes with no active production queue
+- Units with `standing_order = defend` or `patrol` never appear
 
-Per unit in the panel:
-- Click → map pans to that unit's hex
-- **Move** button → enters order mode on the map
-- **Defend** button → sets standing order (persists future turns)
-- **Wait** button → clears unit from list this turn only, resets next turn
-
-Panel auto-hides when empty (all units have orders). Has a toggle to manually open/close.
+Per unit: click to pan map, Move / Defend / Wait buttons.
 
 ---
 
-## Future Features (not yet designed)
+## Future Features
 
-- **Fortify** order: unit spends N turns fortifying a hex, building up a `fortification_level` that adds to `defense_bonus` for stationary defenders
-- **Supply lines**: full radius + supply unit implementation (see stub above)
-- **Air warfare**: Fighter/Bomber with airstrip requirement, sortie model
-- **Allied vision sharing**: wire up `allied_vision` table
-- **Naval transport**: loading/unloading ground units via Transport
-- **Victory conditions**: beyond "eliminate all enemies"
-- **Initiative/speed mechanics**: breaking simultaneous movement ties
-- **Enemy-spotted queue clearing**: auto-clear movement queues when enemy detected on path
-- **Hills terrain**: elevation 1 (between plains and mountains) — noted in terrain table, add when adding terrain variety to maps
-- **Wetlands terrain**: already in terrain table
-- **Skirmish orders**: fully implement hold and retreat sub-modes
+- **Flight group turn-around rules** — abort if X casualties, return to base if movement permits
+- **Patrol range** — finalize intercept radius (1 or 2) after balance testing
+- **Naval AA** — Battleships / Destroyers firing at air units
+- **Air vs naval strikes** — bombers targeting ships directly
+- **Fortify order** — unit builds up `fortification_level` defense bonus over multiple turns
+- **Supply lines** — full radius + Supply unit implementation
+- **Allied vision sharing** — wire up `allied_vision` table
+- **Naval transport** — loading/unloading ground units via Transport
+- **Victory conditions** — beyond eliminate all enemies
+- **Skirmish orders** — Hold and Retreat sub-modes
+- **Subterranean, hover, orbital, space** locomotion types (stubs exist)
