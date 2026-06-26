@@ -503,30 +503,32 @@ Use largest-remainder rounding so totals add up exactly. Example: 10 infantry + 
 
 ### Unit Combat Stats
 
+**To-Hit** = the number you need to roll ≥ on 2d6 to score a hit. Lower = more accurate.
+
 Ground:
 
-| Unit | Eff | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
+| Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
 |---|---|---|---|---|---|---|---|---|
 | Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 2 |
-| Armor | 6 | 10 | 3 | 4 | 3 | 1 | 3 | 1 |
+| Armor | 6 | **9** | 3 | 4 | 3 | 1 | 3 | 1 |
 | Artillery | 6 | 4 | 2 | 2 | 3 | 4 | 4 | 1 |
 | AA Gun | 9 | 4 | 1 | 1 | 3 | 1 | 2 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 |
 
-Air (defense=0 — saves impossible, every hit kills):
+Air:
 
-| Unit | Eff | Def Eff | Move | LOS | Atk Range | Prod | Man |
-|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | 8 | 5 | 1 | 4 | 1 |
-| Scout Plane | — | — | 10 | 6 | — | 3 | 1 |
-| Bomber | 6 | 10 | 7 | 5 | 1 | 5 | 1 |
-| Transport Plane | — | — | 6 | 3 | — | 3 | 1 |
+| Unit | To-Hit | Def To-Hit | Defense | Pen | Move | LOS | Atk Range | Prod | Man |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Fighter | 7 | — | **5** | 0 | 8 | 5 | 1 | 4 | 1 |
+| Scout Plane | — | — | **4** | 0 | 10 | 6 | — | 3 | 1 |
+| Bomber | 6 | 10 | **4** | 0 | 7 | 5 | 1 | 5 | 1 |
+| Transport Plane | — | — | **3** | 0 | 6 | 3 | — | 3 | 1 |
 
-`Def Eff` = effectiveness of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rare).
+`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (10 = ~8% hit rate, rarely kills).
 
 Naval (HP-based; attack dice per ship):
 
-| Unit | Atk dice | Eff | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
+| Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Prod | Man |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 |
 | Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 1 |
@@ -539,11 +541,11 @@ All stats are starting values — tunable.
 
 ### Air Intercept Combat
 
-| Matchup | Attacker roll | Defender roll |
+| Matchup | Attacker to-hit | Defender to-hit |
 |---|---|---|
-| Fighter vs Fighter | eff 7 | eff 7 |
-| Fighter vs Bombers (no escort) | eff 7 | def_eff 10 (tail gun only) |
-| Escort vs Patrol Fighters | eff 7 | eff 7 |
+| Fighter vs Fighter | 7 | 7 |
+| Fighter vs Bombers (no escort) | 7 | 10 (tail gun only) |
+| Escort vs Patrol Fighters | 7 | 7 |
 
 After escort vs patrol resolves, surviving patrol fighters engage bombers. Bombers surviving any intercept continue to target.
 
