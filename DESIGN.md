@@ -324,6 +324,7 @@ Buildings are placed on the map (either by GM at start or built by players durin
 | Harbor | 10 | 10 | 10 | No | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
 | Airstrip | 4 | 0 | 2 total | Consumed | Anywhere |
 | Bridge | 3 | 0 | 2 total | Consumed | On a Water hex |
+| Fortification | 4 | 0 | 2 total | Consumed | Any land hex |
 | Road | — | 0 | 1 | Present, not consumed | Any passable land hex |
 
 HP = material cost for mat-based buildings. This makes all math trivial: **1 material + 1 manpower adds 1 HP of construction progress**.
@@ -350,6 +351,8 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 **Damage states:**
 - `is_damaged` — HP between 1 and 50% of max (after being operational). Reduced output. Bridges still passable. Airbases/airstrips can still land and take off — only production stops.
 - `is_destroyed` — HP = 0. Non-functional. Bridge impassable. Tag stays on hex.
+
+**Fortification damage exception:** A Fortification gives its full +1 defense bonus as long as it has any HP remaining (damaged or operational). Being damaged does not reduce the bonus. Only complete destruction (HP = 0) removes it. This represents partial bunker/trench systems still providing cover even when damaged.
 
 **Under-construction buildings bombed to 0 HP:** building vanishes entirely (no destroyed tag left on hex). No refund.
 
@@ -639,7 +642,8 @@ Frigate detection stat = 5 (specialized radar). Stealth flight groups require a 
 | Higher elevation than attacker | +1 | Ground vs ground only | Defender didn't move; attacker is on lower terrain |
 | `has_light_vegetation` | +1 | All attacks including bombardment | Defender didn't move this turn |
 | `has_heavy_vegetation` | +2 | All attacks including bombardment | Defender didn't move this turn |
-| Fortified | +1 | All attacks including bombardment | Unit completed Fortify in this hex and has not moved |
+| Fortified (unit order) | +1 | All attacks including bombardment | Unit completed Fortify in this hex and has not moved |
+| Fortification (building) | +1 | All attacks including bombardment | Fortification present in hex with HP > 0; applies to all friendly ground units in hex |
 
 **Elevation check for defense bonus:** Hills defender gets +1 only if attacker is on Plains/Desert/Wetlands/Water. Mountains defender gets +1 only if attacker is not also on Mountains. Elevation bonus does **not** apply against air attacks or bombardment. Vegetation and fortification bonuses **do** apply against bombardment. Units that moved receive no defense bonuses.
 
@@ -655,7 +659,9 @@ Any ground unit can be given the Fortify order. The unit does not move that turn
 
 **Lost on movement:** The moment a fortified unit leaves its hex, the fortification bonus is gone. The physical works are abandoned. Returning to the same hex does not restore it — the unit must Fortify again.
 
-**Stacking with terrain:** Fortify bonus stacks with terrain defense bonuses. A fortified infantry in heavy vegetation gets +2 (vegetation) +1 (fortify) = +3 effective defense bonus.
+**Stacking:** The unit Fortify bonus stacks with terrain bonuses and the Fortification building bonus. A fortified infantry in heavy vegetation inside a built Fortification gets +2 (veg) +1 (unit fortify) +1 (building) = +4 effective defense bonus.
+
+**Fortification building vs unit Fortify order:** These are separate and cumulative. The building is a permanent hex feature benefiting all friendly units there. The unit order is personal and lost when the unit moves. Both can apply simultaneously.
 
 `units.fortification_level` — integer, 0 = not fortified, 1 = fortified. Reset to 0 when unit moves.
 
