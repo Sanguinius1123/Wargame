@@ -156,7 +156,16 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 Costs are stored internally on a **×3 scale** (all movement stats and terrain costs multiplied by 3) so that the 2/3 road multiplier resolves as integers. User-facing values below; engine values = user value × 3.
 
-**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder. This also ensures every unit can always move at least 1 hex per turn regardless of terrain cost.
+**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder.
+
+**Impassable threshold:** If `terrain_cost ≥ 2 × remaining_movement`, the hex is **impassable** for that unit at that point in its move. This makes high-cost terrain act as a hard blocker for slow units:
+- Infantry (mv=2) cannot enter Mountains (cost=4) — 4 = 2×2.
+- Infantry CAN enter Mountains on a road (road cost=2.67 < 4).
+- Armor (mv=4) CAN enter Mountains (4 < 2×4=8).
+- AA Gun (mv=1) cannot enter Hills (cost=2) — 2 = 2×1.
+- Supply (mv=4) can only enter Mountains as their first move — if they spend any MP first, remaining drops below the threshold.
+
+The check uses *remaining* movement, not base movement. Units commit to high-cost terrain early in their move.
 
 | Terrain | foot | mechanized | naval | air |
 |---|---|---|---|---|
