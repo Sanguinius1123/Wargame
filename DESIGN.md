@@ -167,7 +167,20 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 *Naval cannot enter Wetlands without `has_canal`. Canals cost significant manpower to dig. Supply units are the builders for remote construction.
 
-**Roads:** Any hex with `has_road` costs **1 movement point** for ground units (foot and mechanized), regardless of the base terrain cost. A mountain road still costs 1. Naval and air are unaffected.
+**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it (not destroyed by combat). Roads **halve movement cost** (minimum 0.5 MP). For integer tracking, 2 road hexes cost 1 MP — units accumulate half-points.
+
+| Terrain | Normal cost | On road |
+|---|---|---|
+| Plains | 1 | 0.5 (2 hexes/MP) |
+| Hills | 2 | 1 |
+| Mountains (foot) | 2 | 1 |
+| Mountains (mech) | 4 | 2 |
+| Desert (foot) | 2 | 1 |
+| Desert (mech) | 1 | 0.5 (2 hexes/MP) |
+
+Roads create real strategic mobility everywhere — Infantry on a plains road covers 4 hexes instead of 2. Roads connect visually: adjacent road tiles draw a road line between them, including across bridges.
+
+Naval and air are unaffected by roads.
 
 **Desert asymmetry:** foot pays 2 (heat, exhausting); mechanized pays 1 (flat open terrain, ideal for armor).
 
@@ -217,8 +230,16 @@ Building (per resource type):
 Example: Manufacturing Facility (20 materials, 8 HP max), damaged to 1 HP (7 HP missing):
 - Materials: ceil(20 × 7 / 16) = ceil(8.75) = 9 materials to fully repair
 
+**Construction:** Buildings are queued and paid for upfront. They begin at 0 HP and gain **1 HP per turn** automatically. Not operational until max HP is reached. Enemies can attack under-construction buildings to slow or destroy them. If destroyed before completion (HP = 0): building is lost, no refund.
+
+**Building status field:** `under_construction` → `operational` → `damaged` → `destroyed`
+- `under_construction`: current_hp < max_hp, never yet reached full HP. No production.
+- `operational`: at max HP. Fully functional.
+- `damaged`: took battle damage after being operational. Reduced output.
+- `destroyed`: HP = 0. Non-functional. Tag stays on hex.
+
 **Damage states:**
-- `is_damaged` — HP 1 to 50% of max. Reduced output. Bridges still passable.
+- `is_damaged` — HP between 1 and 50% of max (after being operational). Reduced output. Bridges still passable.
 - `is_destroyed` — HP = 0. Non-functional. Bridge impassable. Tag stays on hex.
 
 **Production chain:**
