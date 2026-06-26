@@ -564,18 +564,40 @@ Units that moved do NOT receive `defense_bonus`.
 
 ## Bombardment
 
-**TODO: design needed next session.** Open questions:
-- How do artillery/naval bombard rolls work? Same To-Hit + save formula as direct combat, or different?
-- Does the target defend? Unoccupied hex = no save, wasted if empty?
-- Does bombardment deal casualties or just suppress?
-- Bombers dropping ordnance — same formula as artillery? Different payload mechanic?
-- Friendly fire risk for hexes with mixed units?
+Bombardment is indirect fire — the target does not fire back. Resolves in Phase 3 alongside ground combat.
 
-Known so far:
-- Artillery: stationary to bombard (cannot move and fire same turn), no return fire from target
-- Battleship: can move and bombard same turn; cancelled if engaged in naval combat that turn
-- Empty target hex → wasted shot
-- Blind fire: no friendly LOS to target → player gets no combat report
+### Rules Common to All Bombardment
+
+**Two rolls per targeted hex:**
+1. **vs Units** — one 2d6 roll per bombarder. Each roll ≥ To-Hit → 1 hit. Each hit: randomly select a unit in the hex to receive it; that unit makes a normal defense save (roll 2d6 ≥ 14 − defense + pen, using the bombarder's penetration stat). Failed save = 1 casualty or 1 HP damage as normal.
+2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≥ To-Hit → 1 infrastructure hit. **No defense roll for infrastructure.** Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road). If it has HP → loses 1 HP. If it has no HP (urban, vegetation, road) → immediately set to damaged, or destroyed if already damaged.
+
+Multiple bombarders targeting the **same hex** pool their rolls as a single simultaneous attack — hits are totalled before any are applied.
+
+Empty hex (no units, no infrastructure) → wasted bombardment, no report.
+
+Blind fire (no friendly LOS to target) → bombardment resolves normally but player receives no combat report.
+
+### Per-Unit Patterns and Rules
+
+**Artillery**
+- Must be stationary to bombard (cannot move and fire same turn)
+- Target pattern: **1 hex** at range 4–6
+- Rolls: 1 attack die vs units + 1 attack die vs infra (To-Hit 6, Pen 2)
+- Infrastructure selection: random among present pieces
+- No return fire from target
+
+**Battleship**
+- May move and bombard in the same turn; cancelled if engaged in naval combat that turn
+- Target pattern: **3 mutually adjacent hexes (triangle)**; player picks which triangle
+- Rolls: 3 attack dice per hex (matching combat attack dice) vs units + 3 vs infra (To-Hit 6, Pen 2)
+- Infrastructure selection: random among present pieces
+
+**Bombers**
+- Bombing resolves as part of air-to-ground strikes (survivors from Phase 1)
+- Target pattern: **3 hexes in a line** along the bomb run path
+- Rolls: 1 attack die per hex vs units + 1 vs infra (To-Hit 7, Pen 1)
+- Infrastructure selection: player may **designate one target** per hex. Designated target = 70% chance of being selected; remaining 30% distributed equally among other infra present. Undesignated = equal random weight.
 
 ---
 
@@ -615,7 +637,7 @@ Manpower per turn = sum over all controlled settlements of their connected urban
 
 Controlling urban sprawl around a settlement directly increases your manpower budget. Expensive constructions (Manufacturing Facility = 20 manpower) require large cities or multiple cities active in the same turn.
 
-*(Open question: should expensive builds span multiple turns, drawing from each turn's manpower budget? TBD.)*
+Manpower spent on construction is committed to the building and persists as HP progress. Manpower not spent on anything is wasted at end of turn.
 
 ---
 
@@ -676,7 +698,6 @@ Collapsible sidebar: units needing orders, idle facilities.
 
 ## Future Features
 
-- **Manpower multi-turn construction** — decide if expensive builds (MF = 20 manpower) can draw from consecutive turns' budgets
 - **Railroads** — `has_railroad` hex attribute. Very fast ground unit movement. Expensive to build. Supply unit + large material/manpower cost.
 - **Flight group turn-around rules** — abort at X casualties if movement permits
 - **Patrol range** — finalize 1 or 2 hexes after balance testing

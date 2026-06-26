@@ -53,7 +53,7 @@ Full game design: `DESIGN.md`
 - **Flight group system:** Air actions use flight groups. AA fires before patrol intercepts. Stealth groups require detection roll before AA/intercept can engage.
 - **Stealth and detection:** Universal system. Units in open = auto-detected. Units in cover get terrain stealth bonus. Stealth-tagged units always need detection roll. Formula: threshold = 7 + distance + effective_stealth − effective_detection. Roll 2d6 ≥ threshold. Cannot target undetected units.
 - **Win condition:** Hold 2/3 of `has_settlement` hexes at end of turn. Tunable per player count.
-- **Bombardment mechanics: NOT YET DESIGNED.** To-do next session. Known: artillery stationary to fire, battleship can move+bombard, empty hex = wasted shot, blind fire = no report.
+- **Bombardment mechanics:** Two rolls per hex (vs units, vs infra). Units get normal defense save with bombarder's pen. No save for infrastructure — random selection, HP infra loses 1 HP, no-HP infra set damaged/destroyed. Artillery: 1 hex, range 4–6, stationary, 1 die per hex (To-Hit 6, Pen 2). Battleship: 3-hex triangle, 3 attack dice per hex, can move+bombard (To-Hit 6, Pen 2). Bombers: 3-hex line, 1 die per hex, player designates infra target (70% hit chance) (To-Hit 7, Pen 1). Blind fire = no report. Empty hex = wasted.
 
 ## Schema
 
@@ -134,7 +134,7 @@ client/src/
 - [x] Supabase project created
 - [x] .env files configured (REGISTRATION_CODE=wargame)
 - [x] DESIGN.md fully written — terrain, movement, combat, buildings, fog, resources, units
-- [ ] **Bombardment mechanics designed** (next design task)
+- [x] **Bombardment mechanics designed**
 - [ ] Migration 007 written and applied
 - [ ] Combat resolution implemented (server/src/utils/combat.js)
 - [ ] Movement validation implemented (server/src/utils/movement.js)
