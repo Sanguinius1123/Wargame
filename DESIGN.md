@@ -554,6 +554,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
+| **Fortify** | ground | Dig in. Completes at end of Phase 3 if not engaged. +1 defense bonus next turn onward. Cancelled if attacked before completion. Bonus lost when unit leaves hex. |
 | **Repair** | naval (at Harbor), air (at Airbase) | Only available if unit is damaged AND at a repair facility. Uses 1 repair slot. Completes in 1 turn. |
 | **Skirmish Hold** *(stub)* | ground | Reduced damage; no advance even if enemy wiped. |
 | **Skirmish Retreat** *(stub)* | ground | Fire then fall back to designated hex. |
@@ -638,8 +639,25 @@ Frigate detection stat = 5 (specialized radar). Stealth flight groups require a 
 | Higher elevation than attacker | +1 | Ground vs ground only | Defender didn't move; attacker is on lower terrain |
 | `has_light_vegetation` | +1 | All attacks including bombardment | Defender didn't move this turn |
 | `has_heavy_vegetation` | +2 | All attacks including bombardment | Defender didn't move this turn |
+| Fortified | +1 | All attacks including bombardment | Unit completed Fortify in this hex and has not moved |
 
-**Elevation check for defense bonus:** Hills defender gets +1 only if attacker is on Plains/Desert/Wetlands/Water. Mountains defender gets +1 only if attacker is not also on Mountains. Elevation bonus does **not** apply against air attacks or bombardment. Vegetation bonuses **do** apply against bombardment. Units that moved receive no defense bonuses.
+**Elevation check for defense bonus:** Hills defender gets +1 only if attacker is on Plains/Desert/Wetlands/Water. Mountains defender gets +1 only if attacker is not also on Mountains. Elevation bonus does **not** apply against air attacks or bombardment. Vegetation and fortification bonuses **do** apply against bombardment. Units that moved receive no defense bonuses.
+
+### Fortify
+
+Any ground unit can be given the Fortify order. The unit does not move that turn — it digs in, builds cover, and establishes a defensive position.
+
+**Completion:** Fortify completes at the end of Phase 3 if the unit was not engaged in combat that phase. The +1 defense bonus takes effect at the start of the following turn.
+
+**Cancellation:** If the unit is attacked (enemy enters its hex or hex is contested) before the end of Phase 3, fortification is cancelled — the unit fights normally with no bonus from this turn's fortify attempt. It can try again next turn.
+
+**Persistence:** Once fortified, the +1 defense bonus persists indefinitely as long as the unit remains in that hex. It applies against all attacks: direct combat, bombardment, and air strikes.
+
+**Lost on movement:** The moment a fortified unit leaves its hex, the fortification bonus is gone. The physical works are abandoned. Returning to the same hex does not restore it — the unit must Fortify again.
+
+**Stacking with terrain:** Fortify bonus stacks with terrain defense bonuses. A fortified infantry in heavy vegetation gets +2 (vegetation) +1 (fortify) = +3 effective defense bonus.
+
+`units.fortification_level` — integer, 0 = not fortified, 1 = fortified. Reset to 0 when unit moves.
 
 ### Combat Formula (Simultaneous Volleys)
 
@@ -937,7 +955,6 @@ Collapsible sidebar: units needing orders, idle facilities.
 - **Patrol range** — finalize 1 or 2 hexes after balance testing
 - **Emergency landing** — air units with no valid airstrip crash; rules for forced landing at non-airstrip hexes
 - **Commando unit** — ground + stealth; infiltration behind lines
-- **Fortify order** — build up `fortification_level` defense bonus over turns
 - **Supply lines** — full radius + Supply unit implementation
 - **Allied vision sharing** — wire up `allied_vision` table
 - **Victory condition tuning** — per player count, alternative win types
