@@ -153,9 +153,12 @@ supabase/migrations/
                                 - units: add standing_order, hp, fortification_level columns
                                 - buildings table (game_id, hex_q, hex_r, type, current_hp,
                                   max_hp, status, owner_faction_id)
-                                  types: manufacturing_facility, airbase, harbor, airstrip,
-                                  bridge, fortification
+                                  types: factory, airbase, harbor, airstrip, bridge, fortification
 ```
+
+Note: Migrations 001–006 were fully rewritten in session 7 for a clean build.
+Migration 007 was never written — its requirements are now incorporated into the clean 001–006.
+Schema is applied to Supabase. DB is empty and ready.
 
 ## Key Server Routes
 
@@ -169,15 +172,15 @@ GET  /api/games/:gameId/participants
 POST /api/games/:gameId/finish-turn  — player marks ready; auto-advances when all ready
 GET  /api/games/:gameId/turn-status  — GM: list of players + turn_ready status
 GET  /api/map/:gameId/hexes          — fog-of-war filtered for players; full for GM
-GET  /api/map/:gameId/hexes/:q/:r    — single hex detail
+GET  /api/map/:gameId/hexes/:q/:r    — single hex detail (includes full unit_type_config stats)
 PATCH /api/map/:gameId/hexes/:q/:r  — GM edits terrain/attributes/owner
-POST /api/map/:gameId/orders         — player queues movement/bombard/fortify/repair/flight group/patrol order
-DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit
-POST /api/map/:gameId/production     — queue unit production at a facility hex
-POST /api/gm/:gameId/units           — GM places unit
+POST /api/map/:gameId/orders         — queue orders; body: { unit_id, order_type, path[]|to_hex_q/r, target_hex_q/r }
+DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
+POST /api/map/:gameId/production     — queue unit production at a factory hex
+POST /api/gm/:gameId/units           — GM places unit (body: faction_id, unit_type_name, hex_q, hex_r, quantity)
 DELETE /api/gm/:gameId/units/:id
-PATCH /api/gm/:gameId/factions/:id/resources
-POST /api/gm/:gameId/advance-turn    — GM force-advance turn
+PATCH /api/gm/:gameId/factions/:id/resources  — body: { materials, manpower }
+POST /api/gm/:gameId/advance-turn    — GM force-advance turn (calls executeGroundMoves)
 ```
 
 ## Key Frontend Components
@@ -185,34 +188,35 @@ POST /api/gm/:gameId/advance-turn    — GM force-advance turn
 ```
 client/src/
   components/
-    HexGrid.jsx    — SVG hex renderer. Props: hexes, onSelect, onDoubleClick, panZoom, selectedKey
-                     Handles pan (drag) + zoom (wheel). Fog states affect color/overlay.
-    HexMap.jsx     — Loads hexes from server, renders HexGrid + detail panel.
+    HexGrid.jsx    — SVG hex renderer. Props: hexes, onSelect, panZoom, selectedKey,
+                     moveMode, movePath, onPathClick. Draws move arrows + path highlights.
+    HexMap.jsx     — Loads hexes, renders HexGrid + detail/order panel. Manages move mode state.
+                     OrderPanel shows available orders for selected unit (player only).
     UnitIcon.jsx   — Per-unit-type inline SVG icon.
     ProtectedRoute.jsx
   pages/
     Login.jsx
     GameList.jsx
-    GameView.jsx     — Player map view with resource bar
-    GMDashboard.jsx  — Full GM view: map + faction manager + unit placer + advance turn
+    GameView.jsx     — Player map view: resources, Finish Turn button, HexMap
+    GMDashboard.jsx  — GM view: turn status panel, faction manager, unit placer, advance turn
 ```
 
 ## Current Status
 
-- [x] Schema designed and migrations written (001–006)
+- [x] Schema designed and migrations written (001–006, clean rewrite)
 - [x] Server scaffold (all routes)
 - [x] Client scaffold (all pages + components)
-- [x] Supabase project created
+- [x] Supabase project created and schema applied
 - [x] .env files configured (REGISTRATION_CODE=wargame)
 - [x] DESIGN.md complete — all mechanics fully designed and reviewed
-- [ ] Migration 007 written and applied
+- [x] finish-turn + turn-status endpoints
+- [x] Production queue endpoint (POST /api/map/:gameId/production)
+- [x] Movement order UI (click unit → click hex waypoints → yellow arrows → confirm)
+- [x] Finish Turn button (player portal)
+- [x] GM turn status panel (green/red dots per player)
+- [x] Movement validation + execution (server/src/utils/movement.js) — in progress
+- [ ] advance-turn rewritten with full 4-phase pipeline (Phase 1 air, 2 naval, 3 ground, 4 collect)
 - [ ] Combat resolution implemented (server/src/utils/combat.js)
-- [ ] Movement validation implemented (server/src/utils/movement.js)
-- [ ] advance-turn rewritten with full 4-phase pipeline
-- [ ] finish-turn + turn-status endpoints
-- [ ] Production queue endpoint
-- [ ] Movement order UI (click unit → click destination → SVG arrows)
-- [ ] Left panel (unit order list + facility list)
-- [ ] Finish Turn button (player portal)
-- [ ] GM turn status panel
+- [ ] GM hex editor UI (click hex on map → edit terrain/attributes panel)
 - [ ] Win condition check
+- [ ] Fog of war: unit-based visibility (currently scouted_hexes only; no unit LOS update in advance-turn)
