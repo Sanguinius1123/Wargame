@@ -5,6 +5,7 @@
 
 import { executeGroundMoves } from './movement.js';
 import { executeGroundCombat } from './combat.js';
+import { processEndOfPhase3 } from './ordersPhase.js';
 import { runPhase4 } from './phase4.js';
 import { computeVisibility, markScouted } from './visibility.js';
 
@@ -16,8 +17,9 @@ export async function resolveTurn(db, gameId) {
   // Phase 1: Air — stub
   // Phase 2: Naval — stub
 
-  // Phase 3: Ground movement then combat
+  // Phase 3: Ground movement → fortify processing → combat
   const moveResult   = await executeGroundMoves(db, gameId, currentTurn);
+  const ordersResult = await processEndOfPhase3(db, gameId, currentTurn, moveResult.movedUnitIds);
   const combatResult = await executeGroundCombat(db, gameId, currentTurn);
 
   // Clear orders
@@ -48,6 +50,8 @@ export async function resolveTurn(db, gameId) {
       moved: moveResult.moved,
       skipped: moveResult.skipped,
       move_errors: moveResult.errors,
+      fortified: ordersResult.fortified,
+      cleared: ordersResult.cleared,
       hexes_fought: combatResult.hexesFought,
       total_casualties: combatResult.totalCasualties,
       combat_errors: combatResult.errors,
