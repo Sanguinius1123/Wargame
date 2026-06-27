@@ -21,10 +21,9 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 ### Phase 1 — Air
 
 1. **All flight groups commit.** Paths and mission types locked. Standing patrol orders from previous turns remain active.
-2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: fire once at each detected enemy flight group whose path passes within overwatch range. Stealth groups require a detection roll first — undetected groups pass through silently. Multiple AA units fire independently.
-3. **Patrol intercepts.** For each detected enemy flight group entering a patrol area: one combined battle involving all fighters and bombers present on both sides simultaneously. Escorts, patrol fighters, and bombers all roll at the same time — there is no sequential escort-first-then-bombers sequence. Casualties applied after all volleys. Multiple patrol zones = multiple separate battles in path order.
-4. **Casualties applied.** AA hits and intercept casualties resolved; destroyed aircraft removed.
-5. **Surviving bombers participate in their target phase(s):**
+2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: fire once at each detected enemy flight group whose path passes within overwatch range. Stealth groups require a detection roll first — undetected groups pass through silently. Multiple AA units fire independently. **AA casualties are applied immediately** before any patrol intercepts — flight groups enter patrol zones already attrited.
+3. **Patrol intercepts (sequential).** For each detected enemy flight group, process each patrol zone in path order as a separate battle. All fighters and bombers on both sides roll simultaneously — no sequential escort-first sequence. Casualties applied immediately after each battle before the next patrol zone is resolved. The group continues into the next zone with whatever strength remains.
+4. **Surviving bombers participate in their target phase(s):**
    - **Attack Run** designates a single target hex → Phase 2 if targeting a naval hex; Phase 3 if targeting a ground hex.
    - **Bombing Run** targets a 3-hex line. Bombers participate in **Phase 2** for any water hexes in the line and **Phase 3** for any land hexes. A Bombing Run spanning both domains participates in both phases — Phase 2 casualties reduce the group before Phase 3 attacks resolve.
 
@@ -373,9 +372,9 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 
 **Supply units as builders:** One action per turn — the truck either moves OR builds, not both. Build actions:
 - **Road:** truck stays in place, builds up to 3 segments in adjacent hexes (per terrain limits). Truck not consumed. Segments complete immediately in Phase 4.
-- **Airstrip / Bridge:** truck moves into position and commits to construction. Truck is consumed at completion. Construction completes at end of Phase 4 (production step). If the truck is destroyed during Phase 3 ground combat before Phase 4, construction fails and all resources spent are lost.
+- **Airstrip / Bridge / Fortification / Canal:** truck commits to construction. Truck is consumed at completion. Construction completes at end of Phase 4 (production step). If the truck is destroyed during Phase 3 ground combat before Phase 4, construction fails and all resources spent are lost.
 
-A truck executing a road order builds during Phase 3 in place. A truck committed to airstrip/bridge construction does not move that turn and is consumed at Phase 4.
+A truck executing a road order builds during Phase 3 in place. A truck committed to any other construction does not move that turn and is consumed at Phase 4.
 
 ---
 
@@ -428,7 +427,7 @@ effective_detection  = detector.detection + domain_modifier
 detection_score      = 7 + effective_detection − effective_stealth − distance
 ```
 
-Roll **2d6 ≤ detection_score** → detected this turn. Capped: detection_score > 12 = auto-detect, detection_score < 2 = impossible. Detection is attempted each turn within the detector's detection range.
+Roll **2d6 ≤ detection_score** → detected this turn. Capped: detection_score > 12 = auto-detect, detection_score < 2 = impossible. Detection is attempted each turn within the detector's LOS range (submarines: sonar range instead of LOS).
 
 Once detected, the unit is visible to that faction. The roll re-runs each turn — a faction can lose track of a unit if the detector moves away or is destroyed.
 
@@ -551,7 +550,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 
 **Ground patrol:** the patrolling unit moves to intercept when a detected enemy enters its patrol area (LOS required to react). The patrolling unit moves into the hex the enemy tried to enter and close combat triggers there. After combat: if the patrol unit wins (enemy wiped), the patrol unit stays in that hex; the patrol order is complete for this turn. If the enemy wins (patrol unit wiped), the enemy continues movement from that hex with remaining movement points. If both survive, the enemy is pushed back to the hex it came from; the patrol unit remains in the intercepted hex.
 
-**Naval patrol:** patrolling ships move out (up to patrol radius 2) to intercept enemy ships that enter their patrol area. Contact follows the same rules as normal naval movement contact — ships stop, fight, then survivors continue. LOS applies; ships must detect the contact to react. Detection rolls apply as normal for submerged submarines.
+**Naval patrol:** when a detected enemy ship enters the patrol area, the patrolling ship moves to intercept — it moves to the hex the enemy ship entered and triggers a hex collision there. After combat: if the patrol ship wins, it stays in that hex; the patrol order is complete for this turn. If the enemy wins, it continues movement from that hex. If both survive, the enemy is pushed back to its prior hex and the patrol ship holds the intercepted hex. LOS required to react; submarines require a detection roll before the patrol ship will respond.
 
 **Air patrol:** fighters fly out to intercept detected enemy flight groups entering the patrol area. The patrol radius formula determines coverage (see above). Undetected stealth groups pass through without triggering intercept.
 
@@ -565,10 +564,10 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
 | **Bombard** | Artillery, Battleship | Indirect fire at a specific hex at bombard range (Artillery: 1–8 hexes, 1 hex; Battleship: 1–8 hexes, 3-hex triangle). Artillery must be stationary. Unit skips the Phase 3 ranged fire step when on this order. |
-| **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
+| **Patrol** | any combat unit | Standing order. Unit intercepts detected enemies entering its patrol radius. Only available to units with a To-Hit stat. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
-| **Fortify** | ground | Dig in. Completes at end of Phase 3 if not engaged. +1 defense bonus next turn onward. Cancelled if attacked before completion. Bonus lost when unit leaves hex. |
+| **Fortify** | ground | Dig in. Completes at end of Phase 3 if not engaged in **close combat** (enemy in same hex). Ranged fire does NOT cancel it. +1 defense bonus next turn onward. Bonus lost when unit leaves hex. |
 | **Repair** | naval (at Harbor), air (at Airbase) | Only available if unit is damaged AND at a repair facility. Uses 1 repair slot. Completes in 1 turn. |
 | **Skirmish Hold** *(stub)* | ground | Reduced damage; no advance even if enemy wiped. |
 | **Skirmish Retreat** *(stub)* | ground | Fire then fall back to designated hex. |
@@ -668,7 +667,7 @@ Any ground unit can be given the Fortify order. The unit does not move that turn
 
 **Completion:** Fortify completes at the end of Phase 3 if the unit was not engaged in combat that phase. The +1 defense bonus takes effect at the start of the following turn.
 
-**Cancellation:** If the unit is attacked (enemy enters its hex or hex is contested) before the end of Phase 3, fortification is cancelled — the unit fights normally with no bonus from this turn's fortify attempt. It can try again next turn.
+**Cancellation:** Fortification is cancelled only if an enemy enters the unit's hex (close combat triggers) before the end of Phase 3 — the unit fights normally with no bonus from this turn's fortify attempt. Being hit by ranged fire (enemy outside the hex) does **not** cancel fortification; the unit absorbs the fire and continues digging in. It can try again next turn if cancelled.
 
 **Persistence:** Once fortified, the +1 defense bonus persists indefinitely as long as the unit remains in that hex. It applies against all attacks: direct combat, bombardment, and air strikes.
 
@@ -839,13 +838,13 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
 **Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
-- Directed bombardment: up to **8 hexes**. May move and bombard in the same turn; cancelled if engaged in naval combat that turn.
+- Directed bombardment: up to **8 hexes**. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2. Firing in the ranged fire step alone does not cancel the bombard order.
 - Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
 - Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
 
 **Bombers**
-- Bombing resolves as part of air-to-ground strikes (survivors from Phase 1)
+- Bombing resolves in Phase 2 (for naval hex targets) or Phase 3 (for land hex targets); see Phase 1 step 4 for routing
 - Target pattern: **3 hexes in a line** along the bomb run path
 - Rolls: 1 die per hex vs units + 1 vs infra (To-Hit 7, Pen 1)
 - Infrastructure selection: player may **designate one target** per hex. Designated target = 70% chance of being selected; remaining 30% distributed equally among other infra present. Undesignated = equal random weight.
