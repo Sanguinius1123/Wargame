@@ -80,7 +80,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
   const { visible, scouted } = await computeVisibility(adminDb, faction.id, gameId);
 
-  markScouted(adminDb, faction.id, gameId, visible, game?.current_turn ?? 0);
+  await markScouted(adminDb, faction.id, gameId, visible, game?.current_turn ?? 0);
 
   res.json(hexes.map(h => {
     const k = `${h.hex_q},${h.hex_r}`;

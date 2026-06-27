@@ -40,7 +40,7 @@ const ORDER_TYPE_LABELS = {
   fortify: 'Fortify',
   bombard: 'Bombard',
   retreat: 'Retreat',
-  pursue:  'Pursue if Retreat',
+  pursue_if_retreat: 'Pursue if Retreat',
   repair:  'Repair',
 };
 
