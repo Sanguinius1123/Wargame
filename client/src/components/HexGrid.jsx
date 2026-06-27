@@ -44,7 +44,30 @@ function getTopUnits(units) {
   return Object.values(grouped).slice(0, 3);
 }
 
-export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = false, selectedKey = null }) {
+function arrowPath(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return null;
+  const nx = dx / len, ny = dy / len;
+  // shorten line slightly so arrowhead sits at hex center
+  const mx = x2 - nx * 8, my = y2 - ny * 8;
+  const px = -ny, py = nx; // perpendicular
+  return {
+    line: `M${x1},${y1} L${mx},${my}`,
+    arrow: `M${x2},${y2} L${mx + px * 5},${my + py * 5} L${mx - px * 5},${my - py * 5} Z`,
+  };
+}
+
+export default function HexGrid({
+  hexes,
+  onSelect,
+  onDoubleClick,
+  panZoom = false,
+  selectedKey = null,
+  moveMode = false,
+  movePath = [],
+  onPathClick,
+}) {
   const safeHexes = hexes ?? [];
   const SIZE = 36;
   const PAD = SIZE * 2;
@@ -96,8 +119,12 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
 
   const handleHexClick = useCallback((h) => {
     if (dragRef.current?.moved) return;
-    onSelect?.(h);
-  }, [onSelect]);
+    if (moveMode) {
+      onPathClick?.(h);
+    } else {
+      onSelect?.(h);
+    }
+  }, [onSelect, moveMode, onPathClick]);
 
   const handleHexDbl = useCallback((h, e) => {
     e.stopPropagation();
@@ -108,11 +135,23 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
 
   const viewBox = `${vb.x} ${vb.y} ${vb.width} ${vb.height}`;
 
+  // Build a lookup from "q,r" → pixel center for arrow rendering
+  const pixelByKey = {};
+  for (const h of pixels) {
+    pixelByKey[`${h.hex_q},${h.hex_r}`] = {
+      cx: h.x - minX + PAD / 2,
+      cy: h.y - minY + PAD / 2,
+    };
+  }
+
+  // Build set of movePath hex keys for highlight
+  const movePathKeys = new Set(movePath.map(p => `${p.q},${p.r}`));
+
   return (
     <svg
       ref={svgRef}
       viewBox={viewBox}
-      style={{ width: '100%', height: '100%', cursor: panZoom ? 'grab' : 'default', display: 'block' }}
+      style={{ width: '100%', height: '100%', cursor: moveMode ? 'crosshair' : (panZoom ? 'grab' : 'default'), display: 'block' }}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
@@ -127,6 +166,7 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
         const isScouted = vis === 'scouted';
         const hexKey = `${h.hex_q},${h.hex_r}`;
         const isSelected = hexKey === selectedKey;
+        const isInPath = movePathKeys.has(hexKey);
         const baseColor = isDark ? '#080d15' : (TERRAIN_COLORS[h.terrain] ?? '#334155');
         const topUnits = isDark || isScouted ? [] : getTopUnits(h.units);
 
@@ -134,7 +174,7 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
           <g key={hexKey}
             onClick={() => handleHexClick(h)}
             onDoubleClick={(e) => handleHexDbl(h, e)}
-            style={{ cursor: isDark ? 'default' : 'pointer' }}
+            style={{ cursor: isDark ? 'default' : (moveMode ? 'crosshair' : 'pointer') }}
           >
             {/* Hex fill */}
             <polygon
@@ -150,6 +190,16 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
                 points={hexCorners(cx, cy, SIZE - 1)}
                 fill={VISIBILITY_OVERLAY[vis]}
                 stroke="none"
+              />
+            )}
+
+            {/* Move path highlight overlay */}
+            {isInPath && (
+              <polygon
+                points={hexCorners(cx, cy, SIZE - 1)}
+                fill="rgba(250,204,21,0.25)"
+                stroke="none"
+                style={{ pointerEvents: 'none' }}
               />
             )}
 
@@ -192,6 +242,21 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
                 </g>
               );
             })}
+          </g>
+        );
+      })}
+
+      {/* Arrow layer — rendered on top of all hexes */}
+      {movePath.length > 1 && movePath.slice(0, -1).map((wp, i) => {
+        const from = pixelByKey[`${wp.q},${wp.r}`];
+        const to   = pixelByKey[`${movePath[i + 1].q},${movePath[i + 1].r}`];
+        if (!from || !to) return null;
+        const ap = arrowPath(from.cx, from.cy, to.cx, to.cy);
+        if (!ap) return null;
+        return (
+          <g key={i} style={{ pointerEvents: 'none' }}>
+            <path d={ap.line}  stroke="#facc15" strokeWidth={2} fill="none" />
+            <path d={ap.arrow} stroke="#facc15" strokeWidth={1} fill="#facc15" />
           </g>
         );
       })}

@@ -24,11 +24,17 @@ export default function GameView() {
   const nav = useNavigate();
   const [game, setGame] = useState(null);
   const [faction, setFaction] = useState(null);
+  const [turnReady, setTurnReady] = useState(false);
+  const [turnMsg, setTurnMsg] = useState('');
+
+  async function authHeaders() {
+    const { data: { session } } = await supabase.auth.getSession();
+    return { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' };
+  }
 
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = { Authorization: `Bearer ${session?.access_token}` };
+      const headers = await authHeaders();
 
       const [gr, fr] = await Promise.all([
         fetch(`${SERVER}/api/games`, { headers }),
@@ -45,6 +51,19 @@ export default function GameView() {
       }
     })();
   }, [gameId, profile]);
+
+  async function finishTurn() {
+    const headers = await authHeaders();
+    const r = await fetch(`${SERVER}/api/games/${gameId}/finish-turn`, { method: 'POST', headers });
+    if (r.ok) {
+      const d = await r.json();
+      setTurnReady(true);
+      setTurnMsg(d.advanced ? `Turn ${d.current_turn} started!` : `Waiting on ${d.waiting_on} other player(s)…`);
+      if (d.advanced) setGame(g => ({ ...g, current_turn: d.current_turn }));
+    } else {
+      setTurnMsg('Error submitting turn.');
+    }
+  }
 
   return (
     <div style={s.page}>
@@ -72,6 +91,22 @@ export default function GameView() {
           </div>
         </div>
       )}
+
+      {/* Finish Turn */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <button
+          onClick={finishTurn}
+          disabled={turnReady}
+          style={{
+            background: turnReady ? '#1e293b' : '#16a34a',
+            border: 'none', borderRadius: 4, padding: '8px 20px',
+            color: turnReady ? '#475569' : '#fff', fontWeight: 700, cursor: turnReady ? 'default' : 'pointer',
+          }}
+        >
+          {turnReady ? 'Orders Submitted' : 'Finish Turn'}
+        </button>
+        {turnMsg && <span style={{ color: '#94a3b8', fontSize: 13 }}>{turnMsg}</span>}
+      </div>
 
       <HexMap gameId={gameId} isGM={false} />
     </div>

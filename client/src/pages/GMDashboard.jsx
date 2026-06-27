@@ -28,6 +28,7 @@ export default function GMDashboard() {
   const [participants, setParticipants] = useState([]);
   const [addForm, setAddForm] = useState({ username: '', name: '', color: '#ef4444' });
   const [unitForm, setUnitForm] = useState({ factionId: '', type: 'Infantry', q: 0, r: 0, qty: 1 });
+  const [turnStatus, setTurnStatus] = useState([]);
   const [msg, setMsg] = useState('');
 
   async function headers() {
@@ -37,14 +38,16 @@ export default function GMDashboard() {
 
   async function load() {
     const h = await headers();
-    const [gr, fr, pr] = await Promise.all([
+    const [gr, fr, pr, ts] = await Promise.all([
       fetch(`${SERVER}/api/games`, { headers: h }),
       fetch(`${SERVER}/api/games/${gameId}/factions`, { headers: h }),
       fetch(`${SERVER}/api/games/${gameId}/participants`, { headers: h }),
+      fetch(`${SERVER}/api/games/${gameId}/turn-status`, { headers: h }),
     ]);
     if (gr.ok) { const gs = await gr.json(); setGame(gs.find(g => g.id === gameId)); }
     if (fr.ok) setFactions(await fr.json());
     if (pr.ok) setParticipants(await pr.json());
+    if (ts.ok) setTurnStatus(await ts.json());
   }
 
   useEffect(() => { load(); }, [gameId]);
@@ -100,6 +103,20 @@ export default function GMDashboard() {
         </div>
 
         <div>
+          {/* Turn Status */}
+          {turnStatus.length > 0 && (
+            <div style={s.panel}>
+              <div style={s.h2}>Turn Status</div>
+              {turnStatus.map(p => (
+                <div key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.ready ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
+                  <span style={{ color: '#e2e8f0', fontSize: 13 }}>{p.username}</span>
+                  <span style={{ color: p.ready ? '#22c55e' : '#64748b', fontSize: 11, marginLeft: 'auto' }}>{p.ready ? 'Ready' : 'Ordering…'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Factions */}
           <div style={s.panel}>
             <div style={s.h2}>Factions</div>
