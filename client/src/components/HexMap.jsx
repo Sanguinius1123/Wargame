@@ -20,10 +20,30 @@ const PANEL_STYLE = {
 const STAT_LABEL = { color: '#64748b', fontSize: 12, marginBottom: 2 };
 const STAT_VALUE = { color: '#e2e8f0', fontWeight: 600, marginBottom: 10 };
 
+const BTN = {
+  base: {
+    border: 'none',
+    borderRadius: 4,
+    padding: '6px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  move:    { background: '#1d4ed8', color: '#e2e8f0' },
+  confirm: { background: '#15803d', color: '#e2e8f0' },
+  cancel:  { background: '#374151', color: '#9ca3af' },
+  clear:   { background: '#7f1d1d', color: '#fca5a5' },
+};
+
 export default function HexMap({ gameId, isGM = false }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Move-order state (player only)
+  const [moveMode, setMoveMode] = useState(false);
+  const [movePath, setMovePath] = useState([]);
+  const [selectedUnit, setSelectedUnit] = useState(null);
 
   const load = useCallback(async () => {
     const headers = await authHeader();
@@ -36,19 +56,105 @@ export default function HexMap({ gameId, isGM = false }) {
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
 
+  // Called when player clicks a hex in normal mode
+  const handleSelect = useCallback((hex) => {
+    setSelected(hex);
+    if (!isGM) {
+      const unit = hex.units?.[0] ?? null;
+      setSelectedUnit(unit);
+      // Exit move mode if they click a new hex without confirming
+      setMoveMode(false);
+      setMovePath([]);
+    }
+  }, [isGM]);
+
+  // Called when player clicks a hex while in move mode
+  const handlePathClick = useCallback((hex) => {
+    const wp = { q: hex.hex_q, r: hex.hex_r };
+    setMovePath(prev => [...prev, wp]);
+  }, []);
+
+  const enterMoveMode = useCallback(() => {
+    if (!selectedUnit) return;
+    // Seed path with unit's current hex
+    const startHex = selected;
+    if (startHex) {
+      setMovePath([{ q: startHex.hex_q, r: startHex.hex_r }]);
+    } else {
+      setMovePath([]);
+    }
+    setMoveMode(true);
+  }, [selectedUnit, selected]);
+
+  const cancelMove = useCallback(() => {
+    setMoveMode(false);
+    setMovePath([]);
+  }, []);
+
+  const confirmMove = useCallback(async () => {
+    if (!selectedUnit || movePath.length < 2) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        path: movePath,
+      }),
+    });
+    setMoveMode(false);
+    setMovePath([]);
+    setSelectedUnit(null);
+    setSelected(null);
+    load();
+  }, [selectedUnit, movePath, gameId, load]);
+
+  const clearOrders = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders/${selectedUnit.id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    setMoveMode(false);
+    setMovePath([]);
+    load();
+  }, [selectedUnit, gameId, load]);
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
       {/* Map */}
       <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 600, position: 'relative' }}>
         {loading
           ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
-          : <HexGrid hexes={hexes} onSelect={setSelected} panZoom selectedKey={selectedKey} />
+          : <HexGrid
+              hexes={hexes}
+              onSelect={handleSelect}
+              panZoom
+              selectedKey={selectedKey}
+              moveMode={moveMode}
+              movePath={movePath}
+              onPathClick={handlePathClick}
+            />
         }
       </div>
 
       {/* Detail panel */}
       <div style={PANEL_STYLE}>
-        {selected ? <HexDetail hex={selected} isGM={isGM} gameId={gameId} onRefresh={load} />
+        {selected
+          ? <HexDetail
+              hex={selected}
+              isGM={isGM}
+              gameId={gameId}
+              onRefresh={load}
+              selectedUnit={selectedUnit}
+              moveMode={moveMode}
+              movePath={movePath}
+              onEnterMoveMode={enterMoveMode}
+              onConfirmMove={confirmMove}
+              onCancelMove={cancelMove}
+              onClearOrders={clearOrders}
+            />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
     </div>
@@ -63,7 +169,19 @@ function Tag({ label, color }) {
   );
 }
 
-function HexDetail({ hex, isGM, gameId, onRefresh }) {
+function HexDetail({
+  hex,
+  isGM,
+  gameId,
+  onRefresh,
+  selectedUnit,
+  moveMode,
+  movePath,
+  onEnterMoveMode,
+  onConfirmMove,
+  onCancelMove,
+  onClearOrders,
+}) {
   const vis = hex.visibility ?? 'visible';
 
   if (vis === 'dark') {
@@ -118,7 +236,83 @@ function HexDetail({ hex, isGM, gameId, onRefresh }) {
           {Object.keys(unitsByFaction).length === 0 && (
             <p style={{ color: '#4b5563', fontSize: 13 }}>No units</p>
           )}
+
+          {/* Order panel — players only, when a unit is selected */}
+          {!isGM && selectedUnit && (
+            <OrderPanel
+              unit={selectedUnit}
+              moveMode={moveMode}
+              movePath={movePath}
+              onEnterMoveMode={onEnterMoveMode}
+              onConfirmMove={onConfirmMove}
+              onCancelMove={onCancelMove}
+              onClearOrders={onClearOrders}
+            />
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+function OrderPanel({ unit, moveMode, movePath, onEnterMoveMode, onConfirmMove, onCancelMove, onClearOrders }) {
+  const hasPath = movePath.length >= 2;
+
+  return (
+    <div style={{
+      marginTop: 16,
+      borderTop: '1px solid #1e293b',
+      paddingTop: 12,
+    }}>
+      {/* Selected unit info */}
+      <div style={{ marginBottom: 10 }}>
+        <p style={STAT_LABEL}>Selected Unit</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: unit.factionColor ?? '#60a5fa',
+            display: 'inline-block', flexShrink: 0,
+          }} />
+          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>
+            {unit.type}
+          </span>
+          <span style={{ color: '#94a3b8', fontSize: 12 }}>
+            {unit.hp != null ? `${unit.hp} HP` : `×${unit.quantity}`}
+          </span>
+        </div>
+        {unit.standing_order && (
+          <Tag label={unit.standing_order} color="#6366f1" />
+        )}
+      </div>
+
+      {/* Move mode state */}
+      {moveMode ? (
+        <div>
+          <p style={{ color: '#fbbf24', fontSize: 11, marginBottom: 8 }}>
+            Click destination hexes to add waypoints ({movePath.length - 1} step{movePath.length !== 2 ? 's' : ''} planned).
+          </p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              style={{ ...BTN.base, ...BTN.confirm, opacity: hasPath ? 1 : 0.5 }}
+              disabled={!hasPath}
+              onClick={onConfirmMove}
+            >
+              Confirm Move
+            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelMove}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button style={{ ...BTN.base, ...BTN.move }} onClick={onEnterMoveMode}>
+            Move
+          </button>
+          <button style={{ ...BTN.base, ...BTN.clear }} onClick={onClearOrders}>
+            Clear Orders
+          </button>
+        </div>
       )}
     </div>
   );
