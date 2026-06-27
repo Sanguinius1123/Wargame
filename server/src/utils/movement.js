@@ -144,6 +144,7 @@ export async function executeGroundMoves(db, gameId, turn) {
   const errors = [];
   let moved = 0;
   let skipped = 0;
+  const movedUnitIds = new Set();
 
   // ------------------------------------------------------------------
   // 1. Load movement orders joined with unit and unit_type_config.
@@ -291,6 +292,7 @@ export async function executeGroundMoves(db, gameId, turn) {
       skipped++;
     } else {
       moved++;
+      movedUnitIds.add(unitId);
     }
   }
 
@@ -358,5 +360,5 @@ export async function executeGroundMoves(db, gameId, turn) {
     }
   }
 
-  return { moved, skipped, errors };
+  return { moved, skipped, errors, movedUnitIds };
 }

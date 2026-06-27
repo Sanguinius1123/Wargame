@@ -42,12 +42,29 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     });
   }
 
+  // Load all buildings grouped by hex
+  const { data: buildings } = await adminDb
+    .from('buildings')
+    .select('hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
+    .eq('game_id', gameId);
+
+  const buildingsByHex = {};
+  for (const b of buildings ?? []) {
+    const k = `${b.hex_q},${b.hex_r}`;
+    if (!buildingsByHex[k]) buildingsByHex[k] = [];
+    buildingsByHex[k].push({ type: b.type, current_hp: b.current_hp, max_hp: b.max_hp, owner_faction_id: b.owner_faction_id });
+  }
+
   if (isGM) {
-    return res.json(hexes.map(h => ({
-      ...h,
-      units: unitsByHex[`${h.hex_q},${h.hex_r}`] ?? [],
-      visibility: 'visible',
-    })));
+    return res.json(hexes.map(h => {
+      const hexKey = `${h.hex_q},${h.hex_r}`;
+      return {
+        ...h,
+        units: unitsByHex[hexKey] ?? [],
+        buildings: buildingsByHex[hexKey] ?? [],
+        visibility: 'visible',
+      };
+    }));
   }
 
   // Player path: find their faction, compute visibility
@@ -68,12 +85,12 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   res.json(hexes.map(h => {
     const k = `${h.hex_q},${h.hex_r}`;
     if (visible.has(k)) {
-      return { ...h, units: unitsByHex[k] ?? [], visibility: 'visible' };
+      return { ...h, units: unitsByHex[k] ?? [], buildings: buildingsByHex[k] ?? [], visibility: 'visible' };
     }
     if (scouted.has(k)) {
-      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [] };
+      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [], buildings: [] };
     }
-    return { hex_q: h.hex_q, hex_r: h.hex_r, visibility: 'dark', units: [] };
+    return { hex_q: h.hex_q, hex_r: h.hex_r, visibility: 'dark', units: [], buildings: [] };
   }));
 });
 
@@ -245,6 +262,39 @@ router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
   await adminDb.from('movement_orders').delete().eq('unit_id', req.params.unitId).eq('turn', game.current_turn);
   res.json({ ok: true });
+});
+
+// GET /api/map/:gameId/orders/:unitId — get current-turn orders for a unit
+router.get('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
+  const { gameId, unitId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  // Load the unit and verify ownership
+  const { data: unit } = await adminDb
+    .from('units')
+    .select('id, faction_id, factions(profile_id)')
+    .eq('id', unitId)
+    .single();
+
+  if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+  if (!isGM && unit.factions?.profile_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your unit' });
+  }
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+
+  const { data: orders, error } = await adminDb
+    .from('movement_orders')
+    .select('order_type, sequence, to_hex_q, to_hex_r, target_hex_q, target_hex_r')
+    .eq('unit_id', unitId)
+    .eq('game_id', gameId)
+    .eq('turn', game.current_turn)
+    .order('sequence', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ orders: orders ?? [] });
 });
 
 export default router;
