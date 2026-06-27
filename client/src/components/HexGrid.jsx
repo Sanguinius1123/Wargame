@@ -214,7 +214,32 @@ export default function HexGrid({
               />
             )}
 
-            {/* Terrain label (not on dark hexes) */}
+            {/* Vegetation overlay — tinted green wash */}
+            {!isDark && h.has_heavy_vegetation && (
+              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(34,197,94,0.18)" stroke="none" style={{ pointerEvents: 'none' }} />
+            )}
+            {!isDark && h.has_light_vegetation && !h.has_heavy_vegetation && (
+              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(134,239,172,0.12)" stroke="none" style={{ pointerEvents: 'none' }} />
+            )}
+
+            {/* Settlement star */}
+            {!isDark && h.has_settlement && (
+              <text x={cx + SIZE * 0.45} y={cy - SIZE * 0.42} textAnchor="middle" fontSize={11}
+                fill="#fbbf24" style={{ pointerEvents: 'none', userSelect: 'none' }}>★</text>
+            )}
+
+            {/* Urban dot */}
+            {!isDark && h.has_urban && !h.has_settlement && (
+              <circle cx={cx + SIZE * 0.45} cy={cy - SIZE * 0.42} r={3} fill="#a78bfa" style={{ pointerEvents: 'none' }} />
+            )}
+
+            {/* Road indicator — thin line through hex center */}
+            {!isDark && h.has_road && (
+              <line x1={cx - SIZE * 0.5} y1={cy} x2={cx + SIZE * 0.5} y2={cy}
+                stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3,2" style={{ pointerEvents: 'none' }} />
+            )}
+
+            {/* Terrain label */}
             {!isDark && (
               <text x={cx} y={cy - SIZE * 0.35} textAnchor="middle" fontSize={10}
                 fill={isScouted ? '#6b7280' : '#e2e8f0'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
