@@ -45,7 +45,7 @@ function roll2d6() {
 // targets : [{ id, weight }]  where weight = unit.quantity (≥ 1)
 // Returns : Map<id, number>   dice allocated to each target (0 if weight = 0)
 // ---------------------------------------------------------------------------
-function distributeDice(totalDice, targets) {
+export function distributeDice(totalDice, targets) {
   const result = new Map();
   if (!targets.length || totalDice <= 0) {
     for (const t of targets) result.set(t.id, 0);
@@ -93,7 +93,7 @@ function distributeDice(totalDice, targets) {
 // Compute additive defense bonus for a unit defending in a given hex.
 // In close combat (same hex) elevation does NOT apply.
 // ---------------------------------------------------------------------------
-function defenseBonus(unit, hex) {
+export function defenseBonus(unit, hex) {
   let bonus = 0;
 
   if (unit.fortification_level === 1) bonus += 1;
