@@ -55,6 +55,14 @@ export default function HexMap({ gameId, isGM = false }) {
   );
 }
 
+function Tag({ label, color }) {
+  return (
+    <span style={{ background: '#1e293b', border: `1px solid ${color}`, borderRadius: 4, padding: '2px 6px', fontSize: 11, color }}>
+      {label}
+    </span>
+  );
+}
+
 function HexDetail({ hex, isGM, gameId, onRefresh }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -80,15 +88,28 @@ function HexDetail({ hex, isGM, gameId, onRefresh }) {
 
       {vis === 'visible' && (
         <>
-          <p style={STAT_LABEL}>Development</p>
-          <p style={STAT_VALUE}>{hex.development ?? 0} / 3</p>
+          {/* Hex attributes */}
+          {(hex.has_settlement || hex.has_urban || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.has_road || hex.has_canal) && (
+            <div style={{ marginBottom: 10 }}>
+              <p style={STAT_LABEL}>Attributes</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {hex.has_settlement && <Tag label="Settlement" color="#fbbf24" />}
+                {hex.has_urban && <Tag label={`Urban HP ${hex.urban_hp ?? 4}/4`} color="#a78bfa" />}
+                {hex.has_heavy_vegetation && <Tag label="Dense Forest" color="#22c55e" />}
+                {hex.has_light_vegetation && !hex.has_heavy_vegetation && <Tag label="Light Forest" color="#86efac" />}
+                {hex.has_road && <Tag label="Road" color="#94a3b8" />}
+                {hex.has_canal && <Tag label="Canal" color="#38bdf8" />}
+              </div>
+            </div>
+          )}
 
+          {/* Units by faction */}
           {Object.entries(unitsByFaction).map(([fname, { color, units }]) => (
             <div key={fname} style={{ marginBottom: 10 }}>
               <p style={{ ...STAT_LABEL, color: color ?? '#60a5fa' }}>{fname}</p>
               {units.map((u, i) => (
                 <p key={i} style={{ color: '#e2e8f0', fontSize: 13 }}>
-                  {u.type} ×{u.quantity}
+                  {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
                 </p>
               ))}
             </div>

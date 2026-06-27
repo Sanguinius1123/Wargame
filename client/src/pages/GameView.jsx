@@ -59,8 +59,8 @@ export default function GameView() {
       {faction && (
         <div style={s.resources}>
           <div style={s.res}>
-            <div style={s.rl}>Production</div>
-            <div style={s.rv}>{faction.production ?? 0}</div>
+            <div style={s.rl}>Materials</div>
+            <div style={s.rv}>{faction.materials ?? 0}</div>
           </div>
           <div style={s.res}>
             <div style={s.rl}>Manpower</div>

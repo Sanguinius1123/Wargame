@@ -165,4 +165,21 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
+router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
+  const { data: unit } = await adminDb
+    .from('units')
+    .select('id, factions(profile_id)')
+    .eq('id', req.params.unitId)
+    .single();
+
+  if (!unit || unit.factions?.profile_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your unit' });
+  }
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  await adminDb.from('movement_orders').delete().eq('unit_id', req.params.unitId).eq('turn', game.current_turn);
+  res.json({ ok: true });
+});
+
 export default router;
