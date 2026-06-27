@@ -534,7 +534,13 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 ## Patrol
 
-Standing order for units that can engage in combat. Patrol is only available to units with a To-Hit stat — units that cannot attack (Supply, Scout Plane, Transport Plane, Transport ship) cannot be assigned patrol orders. **Artillery is also excluded:** when a patrol unit intercepts it physically moves into the contested hex, and Artillery has 0 attack dice in close combat — it would be destroyed automatically. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
+Standing order for units that can engage in close combat. A unit is eligible to patrol if and only if it meets **both** conditions:
+1. Has a To-Hit stat (can attack at all)
+2. Can fire at range 0 (fights in close combat — same hex)
+
+Artillery fails condition 2: its minimum attack range is 2 and it has 0 attack dice in close combat. Since patrol intercept always leads to same-hex combat, Artillery would be destroyed automatically upon intercepting. Units with no To-Hit stat (Supply, Scout Plane, Transport Plane, Transport ship) fail condition 1.
+
+Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
 
 **Patrol radius by unit type:**
 
@@ -576,10 +582,10 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | Order | Units | Description |
 |---|---|---|
 | **Move** | ground, naval | Queue movement. Multi-turn paths supported. |
-| **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
-| **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
+| **Hold Position** | ground, naval | Default standing order. Unit stays put indefinitely and holds this hex until given new orders. No explicit action needed — units default to this state. |
+| **Wait Turn** | ground, naval | Explicitly skip this turn. After the turn resolves, the unit returns to the orders panel (prompts for new orders next turn). |
 | **Bombard** | Artillery, Battleship | Indirect fire at a specific hex at bombard range (Artillery: 1–8 hexes, 1 hex; Battleship: 1–8 hexes, 3-hex triangle). Artillery must be stationary. Artillery skips the Phase 3 ranged fire step; Battleship skips the Phase 2 naval ranged fire step. |
-| **Patrol** | any combat unit except Artillery | Standing order. Unit intercepts detected enemies entering its patrol radius. Only available to units with a To-Hit stat; Artillery excluded (intercept moves the unit into close combat where it has 0 attack dice). |
+| **Patrol** | see Patrol section | Standing order. Unit intercepts detected enemies entering its patrol radius. Requires a To-Hit stat AND the ability to fight at range 0 (close combat). |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
 | **Flight Group (Scout)** | Scout Plane + optional Fighter escort | Fly path to gather LOS. Solo scout groups keep full stealth. LOS only reported if group returns home. |
@@ -1008,7 +1014,7 @@ Full map visibility. Can edit hexes, place/remove units and buildings, adjust re
 ## Player Portal — Left Panel
 
 Collapsible sidebar: units needing orders, idle facilities.
-- Units with `standing_order = defend` or `patrol` never appear
+- Units with `standing_order = hold_position` or `patrol` never appear
 - Bombers without a flight group assignment appear
 
 ---
