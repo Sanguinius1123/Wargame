@@ -58,10 +58,10 @@ Naval movement is step-by-step and simultaneous. All ships advance one hex at a 
    - **Air-to-ground strikes:** surviving bombers assigned to ground targets execute Bombing Run or Attack Run orders.
    - All bombardment and strikes are **indiscriminate** — all units in the targeted hex (friendly, enemy, allied) are eligible to be hit. If allied or friendly units are present in a bombarded hex, they may take casualties.
    - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
-6. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
+6. **Building and infrastructure damage assessed.** Each infrastructure hit from step 5 is applied: HP-based infrastructure (buildings, urban tiles) loses 1 HP per hit — no defense roll. Vegetation: each hit rolls 1d6 (4+ = thin one step: heavy → light, or light → cleared entirely; 1–3 = no change). Roads and canals are immune — they are excluded from the selection pool entirely.
 7. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, factory, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
 
-   **Air units at a captured Airbase:** Air units parked at an Airbase (no orders that turn) that is captured in Phase 3 face the same emergency as carrier-parked aircraft: roll 1d6 per unit — result ≥ 4 → emergency scramble to nearest friendly Airbase or Airstrip within movement range; fail → destroyed on the ground.
+   **Air units at a captured Airbase:** Air units parked at an Airbase (no orders that turn) that is captured in Phase 3 face the same emergency as carrier-parked aircraft: roll 1d6 per unit — result ≥ 4 → emergency scramble to nearest friendly Airbase, Airstrip, or Carrier within movement range; fail → destroyed on the ground.
 
 ---
 
@@ -74,7 +74,7 @@ Naval movement is step-by-step and simultaneous. All ships advance one hex at a 
 2. **Materials collected.** +1 per owned resource tile.
 3. **Production queue advances.** All `pending` orders → `ready`. Units available to place at start of next turn.
 4. **Settlement control evaluated.** For each settlement: assign urban tiles by proximity (see Settlement Control rules), count ownership, apply the 3/4 threshold. Each settlement resolves to controlled (by one faction) or contested.
-5. **Manpower calculated and held.** Using the settlement control results from step 4: sum the assigned urban tile counts of all controlled settlements per faction. Total = manpower budget available to spend at the start of the next turn. Damaged urban tiles produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
+5. **Manpower calculated and held.** Using the settlement control results from step 4: sum the assigned urban tile counts of all controlled settlements per faction. Total = manpower budget available to spend at the start of the next turn. Urban tiles at 1–2 HP produce no manpower; at 0 HP they are destroyed and produce nothing. Manpower is NOT spent here — it carries forward to the ordering phase.
 6. **Win condition check.** Count settlements in a **controlled** state per faction. Any faction controlling ≥ 2/3 of all settlements → wins. Contested settlements count for no one.
 7. **Reset.** `turn_ready` cleared for all players. Turn counter increments.
 
@@ -358,7 +358,7 @@ Fortification:        1 manpower → restores to full HP (regardless of current 
 **Building status (Factory, Airbase, Harbor, Fortification, Airstrip, Bridge):**
 - `under_construction`: never yet reached full HP. Not operational.
 - `operational`: at max HP.
-- `destroyed`: HP = 0. Non-functional. Tag stays on hex. Bridge at 0 HP = impassable.
+- `destroyed`: HP = 0 (previously operational). Non-functional. Tag stays on hex (ruins visible). Bridge at 0 HP = impassable. *Exception: under-construction buildings destroyed at HP=0 vanish entirely — no tag remains (see infrastructure damage).*
 - No separate "damaged" status — HP directly scales production capacity (`floor(current_hp / 2)` slots). Airbases/Airstrips can still land and launch at any HP > 0.
 
 **Urban tiles (4 HP, tracked as `urban_hp` on the hex):**
@@ -565,7 +565,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 
 **Naval patrol:** one intercept per turn. When a detected enemy ship enters the patrol area, the patrolling ship moves to intercept — it moves to the hex the enemy ship entered and triggers a hex collision there. After combat: if the patrol ship wins, it stays in that hex and the patrol order is complete for this turn. If the enemy wins, it continues movement from that hex. If both survive, the enemy is pushed back to its prior hex and the patrol ship holds the intercepted hex. LOS required to react; submarines require a detection roll before the patrol ship will respond.
 
-**Submarine patrol:** Submarines use sonar instead of LOS to detect contacts. A patrolling submarine reacts to any ship it detects via sonar within its patrol radius (max 2 hexes, capped by sonar range 4). Detection roll required before intercept — if the contact isn't detected, it passes through. Intercept otherwise follows the same rules as naval patrol.
+**Submarine patrol:** Submarines use sonar instead of LOS to detect contacts. A patrolling submarine reacts to any ship it detects via sonar within its patrol radius (2 hexes). Detection roll required before intercept — if the contact isn't detected, it passes through. Intercept otherwise follows the same rules as naval patrol.
 
 **Air patrol:** fighters intercept each detected enemy flight group that enters the patrol area — one combat per group, resolved sequentially in the order they enter. Casualties from each battle are applied before the next group is engaged (a group depleted early in Phase 1 may be too weak to handle a later contact). Sending a fighter sweep first to attrit the patrol, then following with bombers, is a valid tactic. Undetected stealth groups pass through without triggering intercept.
 
@@ -859,15 +859,15 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
 **Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
-- Directed bombardment: up to **8 hexes**. Can target **any hex** — land or water. Used to hit predicted enemy ship positions as well as shore targets. Resolves in Phase 3; ships that moved or sank in Phase 2 won't be there. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2. Firing in the ranged fire step alone does not cancel the bombard order.
+- Directed bombardment: up to **8 hexes**. Can target **any hex** — land or water. Used to hit predicted enemy ship positions as well as shore targets. Resolves in Phase 3; ships that moved or sank in Phase 2 won't be there. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2 (see Phase 2 step 7). Taking fire from enemies during the Phase 2 ranged fire step does not cancel the bombard — the Battleship skips that step when it has a Bombard order, but being targeted by other ships' ranged fire does not void the order.
 - Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
-- Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 7, Pen 2)
+- Rolls: 3 dice per hex vs units + 3 dice per hex vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
 
 **Bombers**
 - Bombing resolves in Phase 2 (for naval hex targets) or Phase 3 (for land hex targets); see Phase 1 step 4 for routing
 - Target pattern: **3 hexes in a line** along the bomb run path
-- Rolls: **1 die per bomber per hex** vs units + **1 die per bomber** vs infra (To-Hit 7, Pen 1). Each bomber drops on every hex in the line.
+- Rolls: **1 die per bomber per hex** vs units + **1 die per bomber per hex** vs infra (To-Hit 7, Pen 1). Each bomber drops on every hex in the line.
 - Infrastructure selection: player may **designate one target** per hex. Designated target = 70% chance of being selected; remaining 30% distributed equally among other infra present. Undesignated = equal random weight.
 
 ---
@@ -963,7 +963,7 @@ Manpower not spent during the ordering phase is wasted.
 
 - Tags: naval + air
 - Air unit capacity: **4 slots**. Can carry Fighters and Scout Planes (1 slot each). Cannot carry Bombers.
-- Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
+- Each unit type has a `carrier_slots` value (Fighter = 1, Scout Plane = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
 - Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
 - Air units spawn at any Airbase, Airstrip, or Carrier within 5 hexes of the producing Factory (see Spawn Rules in Production section).
 
