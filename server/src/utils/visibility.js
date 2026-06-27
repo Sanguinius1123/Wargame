@@ -19,26 +19,27 @@ function hexesInRange(q, r, range) {
 export async function computeVisibility(db, factionId, gameId) {
   const [unitsRes, terrainRes, scoutedRes] = await Promise.all([
     db.from('units')
-      .select('hex_q, hex_r, unit_type_config(los_range)')
+      .select('hex_q, hex_r, unit_type_config(los)')
       .eq('faction_id', factionId),
     db.from('hexes')
-      .select('hex_q, hex_r, terrain, terrain_type_config(blocks_los)')
+      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(blocks_los)')
       .eq('game_id', gameId),
     db.from('scouted_hexes')
       .select('hex_q, hex_r')
       .eq('faction_id', factionId),
   ]);
 
+  // Mountains block LOS; vegetation blocks LOS into-but-not-through (handled by isBlocked)
   const blockingSet = new Set(
     (terrainRes.data ?? [])
-      .filter(h => h.terrain_type_config?.blocks_los)
+      .filter(h => h.terrain_type_config?.blocks_los || h.has_light_vegetation || h.has_heavy_vegetation)
       .map(h => key(h.hex_q, h.hex_r))
   );
 
   const visible = new Set();
 
   for (const unit of unitsRes.data ?? []) {
-    const range = unit.unit_type_config?.los_range ?? 2;
+    const range = unit.unit_type_config?.los ?? 2;
     const candidates = hexesInRange(unit.hex_q, unit.hex_r, range);
     for (const k of candidates) {
       if (!isBlocked(unit.hex_q, unit.hex_r, k, blockingSet)) {
