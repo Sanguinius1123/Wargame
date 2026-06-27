@@ -3,9 +3,11 @@
 // Phase 3 executes ground movement (+ combat once combat.js is wired in).
 // Phase 4 collects resources, places production, calculates manpower, checks win.
 
+import { executeRetreatsAndPursuit } from './retreat.js';
 import { executeGroundMoves } from './movement.js';
-import { executeGroundCombat } from './combat.js';
 import { processEndOfPhase3 } from './ordersPhase.js';
+import { executeRangedFireStep } from './rangedFire.js';
+import { executeGroundCombat } from './combat.js';
 import { runPhase4 } from './phase4.js';
 import { computeVisibility, markScouted } from './visibility.js';
 
@@ -17,9 +19,19 @@ export async function resolveTurn(db, gameId) {
   // Phase 1: Air — stub
   // Phase 2: Naval — stub
 
-  // Phase 3: Ground movement → fortify processing → combat
-  const moveResult   = await executeGroundMoves(db, gameId, currentTurn);
+  // Phase 3: Retreats first (locked units escape before movers arrive)
+  const retreatResult = await executeRetreatsAndPursuit(db, gameId, currentTurn);
+
+  // Phase 3: Regular ground movement
+  const moveResult = await executeGroundMoves(db, gameId, currentTurn);
+
+  // Phase 3: Fortify order processing (must know which units moved)
   const ordersResult = await processEndOfPhase3(db, gameId, currentTurn, moveResult.movedUnitIds);
+
+  // Phase 3: Ranged fire step — bombard orders + automatic direct fire (before close combat)
+  const rangedResult = await executeRangedFireStep(db, gameId, currentTurn, moveResult.movedUnitIds);
+
+  // Phase 3: Close combat — same-hex battles
   const combatResult = await executeGroundCombat(db, gameId, currentTurn);
 
   // Clear orders
@@ -47,14 +59,21 @@ export async function resolveTurn(db, gameId) {
   return {
     game: updated,
     phase3: {
+      retreats: retreatResult.retreatCount,
+      pursuits: retreatResult.pursuitCount,
       moved: moveResult.moved,
       skipped: moveResult.skipped,
-      move_errors: moveResult.errors,
       fortified: ordersResult.fortified,
-      cleared: ordersResult.cleared,
+      ranged_casualties: rangedResult.totalCasualties,
+      infra_damage: rangedResult.infraDamage,
       hexes_fought: combatResult.hexesFought,
       total_casualties: combatResult.totalCasualties,
-      combat_errors: combatResult.errors,
+      errors: [
+        ...(retreatResult.errors ?? []),
+        ...(moveResult.errors ?? []),
+        ...(rangedResult.errors ?? []),
+        ...(combatResult.errors ?? []),
+      ],
     },
     phase4: phase4Result,
   };
