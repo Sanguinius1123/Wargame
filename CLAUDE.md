@@ -66,9 +66,10 @@ Full game design: `DESIGN.md`
 - **Combat formula:** Roll-under. Attack: 2d6 ≤ To-Hit → 1 hit. Save: 2d6 ≤ (Defense + defense_bonus − Penetration) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after.
 - **Proportional fire:** Each attacking unit type spreads shots across defending types by count. Largest-remainder rounding. Applies in air intercept too — all units on both sides fire proportionally, dice earmarked per target type before roll.
 - **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
-- **Artillery:** Range 1–8. Stationary. Cannot bombard if engaged in close combat (enemies in own hex). 0 attack dice in direct combat — destroyed automatically if alone against enemies.
-- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, range 1–8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, directed range 8). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
-- **Overwatch Fire:** Available to **any unit with Atk Range > 0**. Standing order. Player designates directional cone (flat-top hex, 6 directions, range up to min(Atk Range, 4); 2/3/4/5 hexes at ranges 1–4). Fires all attack dice at first detected enemy entering cone per turn. Standard To-Hit and Pen. Vs units only (no infra roll). Fires during Phase 3 movement step before close combat. Cancelled if unit enters close combat same step. Battleship: special dual-phase — fires in Phase 2 vs surface ships (ship not stopped) AND Phase 3 vs ground. Cone geometry (2/3/4/5 hexes at ranges 1–4) applies to all units.
+- **Artillery:** Atk Range 2 (direct fire, ranged fire step). Bombard Range 8 (directed indirect fire, Bombard order). Stationary to bombard. Cannot bombard if enemies in own hex. 0 attack dice in close combat — auto-destroyed if alone vs enemies.
+- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, Bombard Range 8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, Bombard Range 8, Atk Range 3). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
+- **Ranged fire step:** Phase 2 (naval) and Phase 3 (ground) each have an automatic ranged fire step before close combat. All units fire at detected enemies within Atk Range — no order required. Simultaneous volleys. Units on Bombard orders skip this step. Artillery: 0 attack dice if enemies in own hex (close combat rules apply).
+- **Overwatch Skies (AA only):** AA Gun, Frigate, Battleship passively fire at detected aircraft in Phase 1. No order required. See Detection & Fog of War section.
 - **Artillery in direct combat:** 0 attack dice. Destroyed automatically if left alone vs enemies.
 
 ### Detection & Fog of War
@@ -107,7 +108,7 @@ Full game design: `DESIGN.md`
 ### Orders
 - **Fortify:** Any ground unit. One uninterrupted turn → +1 defense bonus. Cancelled if engaged before completion. Bonus persists until unit moves. Stacks with terrain and Fortification building bonus.
 - **Repair:** Naval at Harbor, air at Airbase. Only when damaged. Uses 1 repair slot.
-- **Overwatch Fire:** Any unit with Atk Range > 0. Standing order, explicit setup. Fires during Phase 3 movement (before close combat) or Phase 2 (Battleship vs ships). See Orders + Bombardment sections.
+- **Bombard:** Artillery or Battleship. Directed indirect fire at a specific hex. Artillery skips the Phase 3 ranged fire step. Battleship skips if engaged in naval combat that turn.
 - **Naval landing:** Offloading consumes ground units' entire movement for the turn. They land and cannot move in Phase 3 (but can be attacked).
 - **Production queue:** Lost entirely if the production facility is captured in Phase 3. No refund.
 - **Sonar ranges:** Submarine sonar range 4 hexes; Destroyer sonar range 3 hexes (hard caps; detection formula applies within range).

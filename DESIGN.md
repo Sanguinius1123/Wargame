@@ -34,32 +34,31 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 
 Naval movement is path-based, not jump-to-destination. Ships process their movement one step at a time, and contact with enemies interrupts movement mid-path.
 
-1. **Naval units begin movement.** Ships step through their movement paths one hex at a time. After each hex moved, Battleships on **Overwatch Fire** check whether a detected enemy surface ship (not submarine) entered their overwatch cone — if yes, fire 3 dice at that ship immediately (To-Hit 7, Pen 2). The enemy ship is **not stopped** — it takes HP damage and continues. Each Battleship fires overwatch at most once per Phase 2.
-2. **Contact check per step.** After each hex moved, check: is this ship now within its **Atk Range** of any enemy ship? If yes → stop, fight, then continue with remaining movement points. Ships with Atk Range 1 (Destroyer, Frigate, Carrier, Submarine) are stopped when adjacent; Cruiser (range 2) stops within 2 hexes; Battleship (range 3) stops within 3 hexes.
-3. **Detection rolls (per engagement).** Before each naval combat, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
-4. **Naval combat resolves.** All ships present (both sides, all factions at war) roll simultaneously. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. All HP damage applied after volleys.
-5. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
-6. **Movement continues.** Surviving ships resume remaining movement points. Steps 2–5 repeat if further contacts occur.
-7. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
+1. **Naval units begin movement.** Ships step through their movement paths one hex at a time.
+2. **Contact check per step.** After each hex moved, check: is this ship now adjacent to any enemy ship? If yes → stop.
+3. **Detection rolls (per engagement).** Before each naval combat exchange, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
+4. **Ranged fire (naval).** All ships fire once at detected enemy ships within their Atk Range. Simultaneous — all volleys rolled before HP damage applied. Ships not yet at adjacent range but within Atk Range are included (e.g. Cruiser fires at enemies within 2 hexes, Battleship within 3 hexes). Ships on directed Bombard orders against land hexes skip this step.
+5. **Naval combat resolves.** All adjacent ships present (both sides, all factions at war) roll simultaneously for close combat. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. HP damage from ranged fire (step 4) and close combat (step 5) all applied after all volleys in both steps complete.
+6. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
+7. **Movement continues.** Surviving ships resume remaining movement points. Steps 2–6 repeat if further contacts occur.
+8. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
 
 ---
 
 ### Phase 3 — Ground
 
-1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 3. Units that move within range of enemies without entering their hex are NOT forced to engage; they may trigger Overwatch fire (see below). Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules.
-
-   **Overwatch Fire fires during this step.** Any unit with an active Overwatch order fires at the first detected enemy that enters its overwatch cone during movement. Fires immediately when triggered — damage is applied before the moving unit's next step. Uses the unit's standard To-Hit, Pen, and all attack dice; vs units only (no infra roll). Fires at most once per turn per unit. A unit is cancelled from overwatch if an enemy enters its own hex this same step (it fights in close combat instead). Overwatch casualties are applied before step 3 close combat resolves.
-
-2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
-3. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
+1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 4. Units within Atk Range of enemies but NOT in their hex are not forced to engage; they fire on them in the ranged fire step. Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules.
+2. **Ranged fire (ground).** All ground units fire once at detected enemies within their Atk Range. Simultaneous — both sides roll before damage is applied. Units with an active Bombard order targeting a specific distant hex skip this step. Artillery exception: 0 attack dice if enemies are present in its own hex (close combat rules apply instead).
+3. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
+4. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
    - **Artillery bombardment:** stationary artillery not engaged in close combat fire at designated target hexes.
    - **Naval bombardment:** Battleships with validated bombard orders fire at designated land hexes.
    - **Air-to-ground strikes:** surviving bombers assigned to ground targets execute Bombing Run or Attack Run orders.
    - All bombardment and strikes are **indiscriminate** — all units in the targeted hex (friendly, enemy, allied) are eligible to be hit. If allied or friendly units are present in a bombarded hex, they may take casualties.
    - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
-4. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
-5. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, manufacturing facility, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
+5. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
+6. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, manufacturing facility, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
 
 ---
 
@@ -560,8 +559,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Move** | ground, naval | Queue movement. Multi-turn paths supported. |
 | **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
-| **Bombard** | Artillery, Battleship | Attack target hex at range. Artillery must be stationary. |
-| **Overwatch Fire** | Any unit with Atk Range > 0 | Standing order. Designate cone direction (one of 6 flat-top hex directions) and max range up to min(Atk Range, 4). Fires 1 attack roll (all dice for multi-die units) vs units only at first detected enemy entering cone each turn. Uses unit's standard To-Hit and Pen. Cancels if unit engaged in close combat before trigger (ground) or naval combat (Battleship). Artillery and Battleship have additional specific rules — see Bombardment section. |
+| **Bombard** | Artillery, Battleship | Indirect fire at a specific hex at bombard range (Artillery: 1–8 hexes, 1 hex; Battleship: 1–8 hexes, 3-hex triangle). Artillery must be stationary. Unit skips the Phase 3 ranged fire step when on this order. |
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
@@ -735,9 +733,11 @@ Ground:
 |---|---|---|---|---|---|---|---|---|---|
 | Infantry | 6 | 6 | 0 | 2 | 3 | 1 | 1 | 0 | 1 |
 | Armor | 7 | 8 | 2 | 4 | 3 | 1 | 3 | 1 | 2 |
-| Artillery | 7 | 4 | 2 | 2 | 3 | 8 | 4 | 2 | 2 |
+| Artillery | 7 | 4 | 2 | 2 | 3 | 2 | 4 | 2 | 2 |
 | AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
+
+**Atk Range** = direct fire range used in the ranged fire step and close combat. Artillery also has a **Bombard** special ability (indirect fire, range 8, 1 hex target) — see Bombardment section. Units on a Bombard order skip the Phase 3 ranged fire step.
 
 Air:
 
@@ -823,37 +823,11 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - Infrastructure selection: random among present pieces
 - No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
-**Artillery Overwatch Fire** (standing order — player must set this up explicitly)
-
-Uses the general Overwatch Fire rules (see Orders section). Artillery fires **1 die** vs units (To-Hit 7, Pen 2, no infra roll) at the first detected enemy ground unit entering its cone during Phase 3 movement. Cone geometry — player designates one of 6 flat-top hex directions (E, NE, NW, W, SW, SE); max overwatch range 4:
-
-| Range | Hexes in cone |
-|---|---|
-| 1 | 2 |
-| 2 | 3 |
-| 3 | 4 |
-| 4 | 5 (max) |
-
-This cone table applies to all unit Overwatch orders. Fires once per turn. Cancelled if the artillery is engaged in close combat in its own hex before the trigger fires.
-
-**Battleship**
-- Directed bombardment range: up to **8 hexes**. May move and bombard in the same turn; cancelled if engaged in naval combat that turn.
+**Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
+- Directed bombardment: up to **8 hexes**. May move and bombard in the same turn; cancelled if engaged in naval combat that turn.
 - Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
 - Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
-
-**Battleship Overwatch Fire** (standing order — player must set this up explicitly)
-
-Uses the general Overwatch Fire rules (see Orders section). Same cone geometry as Artillery Overwatch (range up to 4, 2/3/4/5 hexes per ring). Fires **3 dice** at the first detected enemy triggering the cone.
-
-Two separate triggers per turn — both can fire in the same turn if the Battleship is not engaged in full naval combat:
-
-- **Phase 2 (Naval):** fires if a detected enemy **surface ship** (not submarine) enters the cone's water hexes. The enemy ship is **not stopped** — it takes HP damage and continues moving. Fires at most once in Phase 2.
-- **Phase 3 (Ground):** fires if detected enemy **ground units** enter the cone's land hexes. Vs units only, no infra roll. Fires at most once in Phase 3.
-
-**Cancellation:** if the Battleship is drawn into a full naval combat exchange during Phase 2 (both sides trading fire), its Phase 3 ground overwatch is cancelled. Phase 2 overwatch fire alone (enemy ship takes hits and moves on without reciprocal combat) does not cancel Phase 3.
-
-To-Hit 7, Pen 2 for all Battleship Overwatch Fire triggers.
 
 **Bombers**
 - Bombing resolves as part of air-to-ground strikes (survivors from Phase 1)
