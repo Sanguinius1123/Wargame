@@ -517,7 +517,7 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 **Path validation:** system checks every unit has enough movement for outbound path + return to nearest friendly airstrip/airbase/Carrier. Rejected if any unit falls short.
 
-**Attrition:** entirely destroyed groups report nothing and provide no LOS. LOS from a flight group is only reported when the group returns home in Phase 4 — a group destroyed in transit loses all scouting data gathered along the path.
+**Attrition:** entirely destroyed groups provide no LOS and report no enemy intel. However, the player **does** receive a combat log entry: the group's composition (unit types and counts), mission type, and planned flight path are recorded. The player knows the group was lost and can see the route it flew — they simply don't know what it encountered or what it saw. LOS from the mission is not delivered.
 
 **Future:** turn-around rules — abort if X casualties, return to base if movement permits.
 
@@ -884,7 +884,7 @@ Stealth units are invisible until detected — they do not appear on enemy maps 
 | Had LOS to battle | Exact | Exact |
 | In battle, no LOS | Exact | Partial — see below |
 | Blind bombardment | No report | No report |
-| Flight group destroyed | — | No report |
+| Flight group destroyed | Group composition + mission type + flight path logged as "never returned" | No enemy intel; no LOS delivered |
 
 **Partial intel (in battle, no external LOS):** When your units fought but you had no observer in LOS range, you know your own losses exactly. For each **individual enemy unit** (each unit of quantity, not each unit type), roll independently: **2/3 chance (67%)** that unit appears in your battle report. Units that fail the roll are not reported. Example: enemy has 10 infantry remaining — expect ~6–7 to appear in the report; the other 3–4 are "undetected." You know a battle occurred and what you lost, but your count of the enemy force is imprecise.
 
