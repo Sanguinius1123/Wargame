@@ -887,14 +887,14 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - Cannot bombard if enemy units are present in the artillery's own hex (engaged in close combat — check before executing bombard orders)
 - Target pattern: **1 hex** at range 1–8 (minimum range 1; cannot fire into own hex)
 - **Elevation bonus:** `effective_bombard_range = 8 + max(0, firer_elevation − target_elevation)`. Artillery on Hills fires up to 9 hexes; on Mountains, up to 10 hexes. Terrain between firer and target does not block the shot arc (high-arc indirect fire).
-- Rolls: 1 die vs units + 1 die vs infra (To-Hit 7, Pen 1)
+- Rolls: 1 die vs units + 1 die vs infra (To-Hit 6, Pen 1)
 - Infrastructure selection: random among present pieces
 - No return fire from target; artillery has no direct fire capability and is completely helpless in close combat — destroyed automatically if enemies occupy its hex
 
 **Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
 - Directed bombardment: up to **8 hexes**. Can target **any hex** — land or water. Used to hit predicted enemy ship positions as well as shore targets. Resolves in Phase 3; ships that moved or sank in Phase 2 won't be there. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2 (see Phase 2 step 7). Taking fire from enemies during the Phase 2 ranged fire step does not cancel the bombard — the Battleship skips that step when it has a Bombard order, but being targeted by other ships' ranged fire does not void the order.
 - Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
-- Rolls: 3 dice per hex vs units + 3 dice per hex vs infra (To-Hit 7, Pen 2)
+- Rolls: 3 dice per hex vs units + 3 dice per hex vs infra (To-Hit 6, Pen 2)
 - Infrastructure selection: random among present pieces
 
 **Bombers**
