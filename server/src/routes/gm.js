@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { adminDb } from '../db.js';
 import { requireGM } from '../middleware/auth.js';
+import { executeGroundMoves } from '../utils/movement.js';
 
 const router = Router();
 
@@ -65,17 +66,20 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   const currentTurn = game?.current_turn ?? 0;
   const nextTurn = currentTurn + 1;
 
-  // TODO: implement full 4-phase resolution pipeline (combat, movement, production, collection)
-  // For now: just clear orders and increment the turn counter.
+  // TODO: implement full 4-phase resolution pipeline
+  // Current: Phase 3 ground movement is executed; other phases (air, naval, production) are stubs.
 
-  // Clear movement orders for this turn
+  // --- Phase 3: Execute ground movement orders ---
+  const moveResult = await executeGroundMoves(adminDb, req.params.gameId, currentTurn);
+
+  // Clear all movement orders for this turn after execution.
   await adminDb
     .from('movement_orders')
     .delete()
     .eq('game_id', req.params.gameId)
     .eq('turn', currentTurn);
 
-  // Advance turn
+  // Advance turn counter.
   const { data: updated, error } = await adminDb
     .from('games')
     .update({ current_turn: nextTurn })
@@ -84,7 +88,15 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(updated);
+
+  res.json({
+    ...updated,
+    phase3: {
+      moved: moveResult.moved,
+      skipped: moveResult.skipped,
+      errors: moveResult.errors,
+    },
+  });
 });
 
 export default router;
