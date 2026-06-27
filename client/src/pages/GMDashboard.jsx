@@ -31,6 +31,8 @@ export default function GMDashboard() {
   const [turnStatus, setTurnStatus] = useState([]);
   const [autoResolve, setAutoResolve] = useState(true);
   const [msg, setMsg] = useState('');
+  const [combatLog, setCombatLog] = useState(null);
+  const [logTurn, setLogTurn] = useState(null);
 
   async function headers() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -79,6 +81,19 @@ export default function GMDashboard() {
     const h = await headers();
     const r = await fetch(`${SERVER}/api/gm/${gameId}/advance-turn`, { method: 'POST', headers: h });
     if (r.ok) { setMsg('Turn advanced.'); load(); } else setMsg('Error advancing turn.');
+  }
+
+  async function loadCombatLog(turn) {
+    const h = await headers();
+    const url = turn != null
+      ? `${SERVER}/api/gm/${gameId}/combat-log?turn=${turn}`
+      : `${SERVER}/api/gm/${gameId}/combat-log`;
+    const r = await fetch(url, { headers: h });
+    if (r.ok) {
+      const d = await r.json();
+      setCombatLog(d);
+      setLogTurn(d.turn);
+    }
   }
 
   async function toggleAutoResolve(val) {
@@ -162,6 +177,29 @@ export default function GMDashboard() {
             </form>
           </div>
 
+          {/* Combat Log */}
+          <div style={s.panel}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={s.h2}>Combat Log</div>
+              <button
+                style={{ ...s.btn, padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }}
+                onClick={() => loadCombatLog(null)}
+              >
+                {combatLog ? 'Reload' : 'Load'}
+              </button>
+            </div>
+            {combatLog && (
+              <CombatLogViewer
+                log={combatLog}
+                onPrev={() => logTurn > 0 && loadCombatLog(logTurn - 1)}
+                onNext={() => logTurn < (combatLog.current_turn - 1) && loadCombatLog(logTurn + 1)}
+              />
+            )}
+            {!combatLog && (
+              <p style={{ color: '#64748b', fontSize: 12 }}>Click Load to view the last resolved turn's combat events.</p>
+            )}
+          </div>
+
           {/* Place unit */}
           <div style={s.panel}>
             <div style={s.h2}>Place Unit</div>
@@ -194,6 +232,86 @@ export default function GMDashboard() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const PHASE_NAMES = { 1: 'Phase 1 — Air', 2: 'Phase 2 — Naval', 3: 'Phase 3 — Ground', 4: 'Phase 4 — Resolution' };
+const LOG_TYPE_COLOR = { combat: '#ef4444', bombardment: '#fb923c', retreat: '#60a5fa', pursuit_roll: '#a78bfa', auto_destroy: '#f87171' };
+
+function CombatLogEntry({ entry }) {
+  const [open, setOpen] = useState(false);
+  const d = entry.data ?? {};
+
+  function summary() {
+    if (d.event === 'auto_destroy') return `Auto-destroyed (no friendly combat unit)`;
+    if (d.event === 'retreat') return `Retreated to (${d.to_hex?.q},${d.to_hex?.r})`;
+    if (d.event === 'retreat_fire') return `Retreat fire: ${Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0)} casualties`;
+    if (d.event === 'pursuit_roll') return `Pursuit ${d.success ? 'SUCCEEDED' : 'failed'} (rolled ${d.roll}/${d.roll_target})`;
+    if (d.event === 'pursuit_auto_fail') return `Pursuit auto-failed (impassable terrain)`;
+    if (d.event === 'pursuit_success') return `Pursuit success — pursuer holds hex`;
+    if (d.log_type === 'bombardment' || entry.log_type === 'bombardment') {
+      return `${d.dice ?? 1} dice → ${d.hits_vs_units ?? 0} unit hits, ${d.hits_vs_infra ?? 0} infra hits`;
+    }
+    const totalCas = Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0);
+    if (totalCas > 0) return `${d.factions?.length ?? '?'} factions, ${totalCas} casualties`;
+    return d.factions?.length ? `${d.factions.length} factions — no casualties` : JSON.stringify(d).slice(0, 60);
+  }
+
+  const typeColor = LOG_TYPE_COLOR[entry.log_type] ?? '#94a3b8';
+
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'flex-start' }}
+      >
+        <span style={{ color: typeColor, fontSize: 10, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>
+          {entry.log_type?.toUpperCase() ?? '?'}
+        </span>
+        <span style={{ color: '#64748b', fontSize: 11, flexShrink: 0 }}>({entry.hex_q},{entry.hex_r})</span>
+        <span style={{ color: '#94a3b8', fontSize: 11 }}>{summary()}</span>
+        <span style={{ color: '#334155', fontSize: 10, marginLeft: 'auto' }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <pre style={{ color: '#64748b', fontSize: 10, background: '#0f172a', borderRadius: 3, padding: 6, marginTop: 4, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {JSON.stringify(entry.data, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function CombatLogViewer({ log, onPrev, onNext }) {
+  if (!log) return null;
+  const entries = log.entries ?? [];
+
+  const byPhase = {};
+  for (const e of entries) {
+    const ph = e.phase ?? 0;
+    if (!byPhase[ph]) byPhase[ph] = [];
+    byPhase[ph].push(e);
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <button onClick={onPrev} style={{ background: 'none', border: '1px solid #1e293b', color: '#64748b', padding: '2px 7px', borderRadius: 3, cursor: 'pointer', fontSize: 12 }}>‹</button>
+        <span style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>Turn {log.turn}</span>
+        <button onClick={onNext} style={{ background: 'none', border: '1px solid #1e293b', color: '#64748b', padding: '2px 7px', borderRadius: 3, cursor: 'pointer', fontSize: 12 }}>›</button>
+        <span style={{ color: '#4b5563', fontSize: 11 }}>{entries.length} event{entries.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {entries.length === 0 && <p style={{ color: '#4b5563', fontSize: 12 }}>No combat events this turn.</p>}
+
+      {Object.entries(byPhase).sort((a, b) => a[0] - b[0]).map(([phase, phEntries]) => (
+        <div key={phase} style={{ marginBottom: 10 }}>
+          <p style={{ color: '#475569', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
+            {PHASE_NAMES[phase] ?? `Phase ${phase}`}
+          </p>
+          {phEntries.map(e => <CombatLogEntry key={e.id} entry={e} />)}
+        </div>
+      ))}
     </div>
   );
 }

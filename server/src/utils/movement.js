@@ -181,7 +181,7 @@ export async function executeGroundMoves(db, gameId, turn) {
     .order('sequence', { ascending: true });
 
   if (ordersError) {
-    return { moved: 0, skipped: 0, errors: [`Failed to load orders: ${ordersError.message}`] };
+    return { moved: 0, skipped: 0, errors: [`Failed to load orders: ${ordersError.message}`], movedUnitIds: new Set() };
   }
 
   if (!orders || orders.length === 0) {
@@ -249,7 +249,7 @@ export async function executeGroundMoves(db, gameId, turn) {
     .eq('game_id', gameId);
 
   if (hexError) {
-    return { moved: 0, skipped: 0, errors: [`Failed to load hexes: ${hexError.message}`] };
+    return { moved: 0, skipped: 0, errors: [`Failed to load hexes: ${hexError.message}`], movedUnitIds: new Set() };
   }
 
   // Build lookup map.
@@ -309,7 +309,7 @@ export async function executeGroundMoves(db, gameId, turn) {
 
   if (allUnitsError) {
     errors.push(`Stack merge: failed to load units — ${allUnitsError.message}`);
-    return { moved, skipped, errors };
+    return { moved, skipped, errors, movedUnitIds };
   }
 
   // Group by the merge key.

@@ -93,10 +93,11 @@ export function distributeDice(totalDice, targets) {
 // Compute additive defense bonus for a unit defending in a given hex.
 // In close combat (same hex) elevation does NOT apply.
 // ---------------------------------------------------------------------------
-export function defenseBonus(unit, hex) {
+export function defenseBonus(unit, hex, hasFortificationBuilding = false) {
   let bonus = 0;
 
   if (unit.fortification_level === 1) bonus += 1;
+  if (hasFortificationBuilding) bonus += 1;
 
   if (hex.has_heavy_vegetation) {
     bonus += 2;
@@ -120,12 +121,14 @@ export function defenseBonus(unit, hex) {
 //
 // unitTypeById : Map<unit_type_id, { id, name, to_hit, defense, penetration, tags }>
 //
+// hexBuildings : Array<{ type, current_hp, owner_faction_id }> — buildings in this hex
+//
 // Returns: {
 //   casualties : Map<unit_id, number>  — total casualties per unit (not yet applied)
 //   log        : string[]              — human-readable roll-by-roll log
 // }
 // ---------------------------------------------------------------------------
-function resolveHexCombat(factionGroups, hex, unitTypeById) {
+function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
   const casualties = new Map(); // unit_id → casualty count
   const log = [];
 
@@ -187,7 +190,10 @@ function resolveHexCombat(factionGroups, hex, unitTypeById) {
       const enemyCfg = unitTypeById.get(enemy.unit_type_id);
       if (!enemyCfg) continue;
 
-      const bonus = defenseBonus(enemy, hex);
+      const hasFortBuilding = hexBuildings.some(
+        b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === enemy.faction_id
+      );
+      const bonus = defenseBonus(enemy, hex, hasFortBuilding);
       let enemyCasualties = 0;
 
       for (let d = 0; d < dicesToRoll; d++) {
@@ -210,7 +216,7 @@ function resolveHexCombat(factionGroups, hex, unitTypeById) {
         // Hit! Roll save.
         const saveTarget = enemyCfg.defense + bonus - pen;
         const saveRoll = roll2d6();
-        const saved = saveRoll <= saveTarget;
+        const saved = saveRoll <= Math.max(0, saveTarget);
 
         log.push(
           `  → Die vs unit ${enemy.id} (${enemyCfg.name}): attack ${attackRoll}/${toHit} HIT, save ${saveRoll}/${Math.max(saveTarget, 0)}${saved ? ' SAVED' : ' CASUALTY'}${bonus ? ` (defense bonus +${bonus})` : ''}.`
@@ -337,12 +343,17 @@ export async function executeGroundCombat(db, gameId, turn) {
   }
 
   // -----------------------------------------------------------------------
-  // 4. Load hex data for vegetation info.
+  // 4. Load hex data for vegetation info; load fortification buildings.
   // -----------------------------------------------------------------------
-  const { data: hexRows, error: hexError } = await db
-    .from('hexes')
-    .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
-    .eq('game_id', gameId);
+  const [{ data: hexRows, error: hexError }, { data: fortBuildingRows }] = await Promise.all([
+    db.from('hexes')
+      .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
+      .eq('game_id', gameId),
+    db.from('buildings')
+      .select('hex_q, hex_r, type, current_hp, owner_faction_id')
+      .eq('game_id', gameId)
+      .eq('type', 'fortification'),
+  ]);
 
   if (hexError) {
     return {
@@ -355,6 +366,13 @@ export async function executeGroundCombat(db, gameId, turn) {
   const hexDataByKey = new Map();
   for (const h of hexRows ?? []) {
     hexDataByKey.set(`${h.hex_q},${h.hex_r}`, h);
+  }
+
+  const fortBuildingsByHex = new Map();
+  for (const b of fortBuildingRows ?? []) {
+    const k = `${b.hex_q},${b.hex_r}`;
+    if (!fortBuildingsByHex.has(k)) fortBuildingsByHex.set(k, []);
+    fortBuildingsByHex.get(k).push(b);
   }
 
   // -----------------------------------------------------------------------
@@ -370,10 +388,11 @@ export async function executeGroundCombat(db, gameId, turn) {
       has_light_vegetation: false,
       has_heavy_vegetation: false,
     };
+    const hexBuildings = fortBuildingsByHex.get(key) ?? [];
 
     let hexResult;
     try {
-      hexResult = resolveHexCombat(factions, hex, unitTypeById);
+      hexResult = resolveHexCombat(factions, hex, unitTypeById, hexBuildings);
     } catch (err) {
       errors.push(`Hex (${q},${r}): combat resolution error — ${err.message}`);
       continue;

@@ -72,6 +72,23 @@ export async function advanceProduction(db, gameId, currentTurn) {
   let placed = 0;
 
   for (const item of ready) {
+    // Verify factory still belongs to this faction (may have been captured in Phase 3).
+    const { data: factoryCheck } = await db
+      .from('buildings')
+      .select('id')
+      .eq('game_id', gameId)
+      .eq('hex_q', item.factory_hex_q)
+      .eq('hex_r', item.factory_hex_r)
+      .eq('type', 'factory')
+      .eq('owner_faction_id', item.faction_id)
+      .maybeSingle();
+
+    if (!factoryCheck) {
+      // Factory captured — production queue lost, no refund.
+      await db.from('production_queue').delete().eq('id', item.id);
+      continue;
+    }
+
     // Try factory hex first, then adjacent hexes
     const candidates = [
       { q: item.factory_hex_q, r: item.factory_hex_r },

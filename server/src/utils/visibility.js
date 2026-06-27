@@ -58,8 +58,20 @@ export async function computeVisibility(db, factionId, gameId) {
   return { visible, scouted };
 }
 
-// Simple LOS check: block if any intermediate hex blocks LOS.
-// Uses a naive step-along-line approach — good enough for hex ranges ≤ 6.
+// Cube-coordinate rounding for hex grids.
+// Rounds (q, r) floats to the nearest valid hex by rounding all three cube
+// coordinates and then correcting the one with the largest rounding error.
+function cubeRound(fq, fr) {
+  const fs = -fq - fr;
+  let rq = Math.round(fq), rr = Math.round(fr), rs = Math.round(fs);
+  const dq = Math.abs(rq - fq), dr = Math.abs(rr - fr), ds = Math.abs(rs - fs);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  return { q: rq, r: rr };
+}
+
+// LOS check: block if any intermediate hex blocks LOS.
+// Uses cube-coordinate rounding for correct hex grid interpolation.
 function isBlocked(fromQ, fromR, toKey, blockingSet) {
   const [toQ, toR] = toKey.split(',').map(Number);
   if (fromQ === toQ && fromR === toR) return false;
@@ -67,8 +79,7 @@ function isBlocked(fromQ, fromR, toKey, blockingSet) {
   const steps = Math.max(Math.abs(toQ - fromQ), Math.abs(toR - fromR), Math.abs((toQ + toR) - (fromQ + fromR)));
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    const iq = Math.round(fromQ + (toQ - fromQ) * t);
-    const ir = Math.round(fromR + (toR - fromR) * t);
+    const { q: iq, r: ir } = cubeRound(fromQ + (toQ - fromQ) * t, fromR + (toR - fromR) * t);
     if (blockingSet.has(key(iq, ir))) return true;
   }
   return false;

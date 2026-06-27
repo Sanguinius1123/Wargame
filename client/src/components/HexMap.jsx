@@ -44,7 +44,7 @@ const ORDER_TYPE_LABELS = {
   repair:  'Repair',
 };
 
-export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null }) {
+export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null, faction = null }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +61,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
 
+  // Production state (player only)
+  const [unitTypes, setUnitTypes] = useState([]);
+  const [productionQueue, setProductionQueue] = useState([]);
+  const [prodMsg, setProdMsg] = useState('');
+
   const load = useCallback(async () => {
     const headers = await authHeader();
     const url = viewAsFactionId
@@ -71,7 +76,19 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     setLoading(false);
   }, [gameId, viewAsFactionId]);
 
+  const loadProduction = useCallback(async () => {
+    if (isGM) return; // Skip for GM and viewAs mode (endpoint uses caller's profile_id)
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/production`, { headers });
+    if (r.ok) {
+      const d = await r.json();
+      setUnitTypes(d.unit_types ?? []);
+      setProductionQueue(d.queue ?? []);
+    }
+  }, [gameId, isGM, viewAsFactionId]);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadProduction(); }, [loadProduction]);
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
 
@@ -252,6 +269,23 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
   }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
 
+  const orderProduction = useCallback(async (unitTypeName, qty, factoryQ, factoryR) => {
+    setProdMsg('');
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/production`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_type_name: unitTypeName, factory_hex_q: factoryQ, factory_hex_r: factoryR, quantity: qty }),
+    });
+    if (r.ok) {
+      setProdMsg(`Ordered ${qty}× ${unitTypeName}.`);
+      await loadProduction();
+    } else {
+      const d = await r.json();
+      setProdMsg(d.error ?? 'Order failed.');
+    }
+  }, [gameId, loadProduction]);
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
       {/* Map */}
@@ -297,6 +331,12 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onRetreat={retreatUnit}
               onPursue={pursueUnit}
               currentOrders={currentOrders}
+              playerFactionId={viewAsFactionId ?? playerFactionId}
+              faction={faction}
+              unitTypes={unitTypes}
+              productionQueue={productionQueue}
+              prodMsg={prodMsg}
+              onOrderProduction={orderProduction}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -334,6 +374,12 @@ function HexDetail({
   onRetreat,
   onPursue,
   currentOrders,
+  playerFactionId = null,
+  faction = null,
+  unitTypes = [],
+  productionQueue = [],
+  prodMsg = '',
+  onOrderProduction,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -403,6 +449,26 @@ function HexDetail({
               })}
             </div>
           )}
+
+          {/* Production panel — player's own operational factory (not in viewAs mode) */}
+          {!isGM && !viewingAsFaction && playerFactionId && (() => {
+            const factory = hex.buildings?.find(
+              b => b.type === 'factory' && b.owner_faction_id === playerFactionId && b.current_hp === b.max_hp
+            );
+            if (!factory) return null;
+            return (
+              <ProductionPanel
+                factoryQ={hex.hex_q}
+                factoryR={hex.hex_r}
+                factory={factory}
+                unitTypes={unitTypes}
+                queue={productionQueue.filter(q => q.factory_hex_q === hex.hex_q && q.factory_hex_r === hex.hex_r)}
+                faction={faction}
+                msg={prodMsg}
+                onOrder={onOrderProduction}
+              />
+            );
+          })()}
 
           {/* Units by faction */}
           {Object.entries(unitsByFaction).map(([fname, { color, units }]) => (
@@ -762,6 +828,100 @@ function OrderPanel({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProductionPanel({ factoryQ, factoryR, factory, unitTypes, queue, faction, msg, onOrder }) {
+  const [selectedType, setSelectedType] = useState('');
+  const [qty, setQty] = useState(1);
+
+  const totalSlots = Math.floor(factory.max_hp / 2);
+  const usedSlots = queue.reduce((s, q) => s + (q.slots ?? 1) * q.quantity, 0);
+  const freeSlots = totalSlots - usedSlots;
+
+  const chosen = unitTypes.find(t => t.name === selectedType);
+  const totalMat = chosen ? chosen.mat_cost * qty : 0;
+  const totalMan = chosen ? chosen.man_cost * qty : 0;
+  const slotsNeeded = chosen ? (chosen.slots ?? 1) * qty : 0;
+  const canAfford = faction
+    ? (faction.materials ?? 0) >= totalMat && (faction.manpower ?? 0) >= totalMan
+    : false;
+  const canFit = slotsNeeded <= freeSlots;
+
+  function submit(e) {
+    e.preventDefault();
+    if (!selectedType || !onOrder) return;
+    onOrder(selectedType, qty, factoryQ, factoryR);
+  }
+
+  const iS = { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 3, padding: '4px 6px', color: '#e2e8f0', fontSize: 12, width: '100%', boxSizing: 'border-box', marginBottom: 6 };
+
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
+      <p style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+        Factory — {freeSlots}/{totalSlots} slots free
+      </p>
+
+      {queue.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <p style={{ color: '#64748b', fontSize: 11, marginBottom: 3 }}>Pending:</p>
+          {queue.map((q, i) => (
+            <p key={i} style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>
+              • {q.quantity}× {q.unit_type_name} ({q.slots ?? 1} slot{q.quantity > 1 || (q.slots ?? 1) > 1 ? 's' : ''} each) — delivers next turn
+            </p>
+          ))}
+        </div>
+      )}
+
+      {freeSlots > 0 && unitTypes.length > 0 && (
+        <form onSubmit={submit}>
+          <select style={iS} value={selectedType} onChange={e => { setSelectedType(e.target.value); setQty(1); }}>
+            <option value="">— select unit type —</option>
+            {unitTypes.map(t => (
+              <option key={t.id} value={t.name}>
+                {t.name} ({t.mat_cost}mat / {t.man_cost}man / {t.slots ?? 1} slot)
+              </option>
+            ))}
+          </select>
+
+          {chosen && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+              <div>
+                <div style={{ color: '#64748b', fontSize: 11 }}>Qty</div>
+                <input type="number" min={1} style={{ ...iS, marginBottom: 0 }} value={qty} onChange={e => setQty(Math.max(1, Number(e.target.value)))} />
+              </div>
+              <div>
+                <div style={{ color: '#64748b', fontSize: 11 }}>Cost</div>
+                <div style={{ color: canAfford ? '#e2e8f0' : '#ef4444', fontSize: 12, marginTop: 2 }}>
+                  {totalMat}mat / {totalMan}man
+                </div>
+                <div style={{ color: canFit ? '#e2e8f0' : '#ef4444', fontSize: 11 }}>
+                  {slotsNeeded} slot{slotsNeeded !== 1 ? 's' : ''}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!selectedType || !canAfford || !canFit}
+            style={{
+              background: (!selectedType || !canAfford || !canFit) ? '#1e293b' : '#15803d',
+              border: 'none', borderRadius: 4, padding: '5px 12px',
+              color: (!selectedType || !canAfford || !canFit) ? '#475569' : '#fff',
+              fontSize: 12, fontWeight: 700,
+              cursor: (!selectedType || !canAfford || !canFit) ? 'default' : 'pointer',
+            }}
+            title="Queue production. Unit will be built during this turn's resolution and arrive next turn adjacent to the factory."
+          >
+            Order
+          </button>
+        </form>
+      )}
+
+      {freeSlots === 0 && <p style={{ color: '#64748b', fontSize: 12 }}>Factory at capacity.</p>}
+      {msg && <p style={{ color: msg.startsWith('Ordered') ? '#22c55e' : '#ef4444', fontSize: 12, marginTop: 6 }}>{msg}</p>}
     </div>
   );
 }

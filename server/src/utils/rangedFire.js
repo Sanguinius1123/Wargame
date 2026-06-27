@@ -330,7 +330,10 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
         const targetCfg = unitTypeById.get(targetUnit.unit_type_id);
         if (!targetCfg) continue;
 
-        const bonus = defenseBonus(targetUnit, targetHex);
+        const hasFortBuilding = (buildingsByHex.get(targetHexKey) ?? []).some(
+          b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === targetUnit.faction_id
+        );
+        const bonus = defenseBonus(targetUnit, targetHex, hasFortBuilding);
 
         for (let d = 0; d < dice; d++) {
           const result = rollAttackAndSave(toHit, targetCfg.defense, bonus, pen);
@@ -467,7 +470,10 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
         has_light_vegetation: false,
         has_heavy_vegetation: false,
       };
-      const bonus = defenseBonus(target, targetHex);
+      const hasFortBuilding = (buildingsByHex.get(targetHexKey) ?? []).some(
+        b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === target.faction_id
+      );
+      const bonus = defenseBonus(target, targetHex, hasFortBuilding);
 
       let hits = 0;
       let casCount = 0;

@@ -126,6 +126,27 @@ router.patch('/:gameId/settings', requireGM, async (req, res) => {
   res.json(data);
 });
 
+// GET /api/gm/:gameId/combat-log?turn=N
+// Returns combat_log entries for the given turn (defaults to last completed turn).
+router.get('/:gameId/combat-log', requireGM, async (req, res) => {
+  const { gameId } = req.params;
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  const currentTurn = game?.current_turn ?? 1;
+  const turn = req.query.turn != null ? Number(req.query.turn) : currentTurn - 1;
+
+  if (turn < 0) return res.json({ turn: 0, entries: [] });
+
+  const { data: entries, error } = await adminDb
+    .from('combat_log')
+    .select('id, turn, phase, hex_q, hex_r, log_type, faction_id, data, created_at')
+    .eq('game_id', gameId)
+    .eq('turn', turn)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ turn, current_turn: currentTurn, entries: entries ?? [] });
+});
+
 // POST /api/gm/:gameId/advance-turn — resolve current turn and advance
 router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   try {

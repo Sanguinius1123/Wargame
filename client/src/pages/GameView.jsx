@@ -142,6 +142,7 @@ export default function GameView() {
         isGM={false}
         viewAsFactionId={viewAsFactionId}
         playerFactionId={faction?.id ?? null}
+        faction={faction}
       />
     </div>
   );

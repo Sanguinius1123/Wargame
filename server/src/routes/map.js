@@ -259,6 +259,43 @@ router.post('/:gameId/production', requireAuth, async (req, res) => {
   res.status(201).json(data);
 });
 
+// GET /api/map/:gameId/production — player's pending production queue + all unit types
+router.get('/:gameId/production', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const { data: faction } = await adminDb
+    .from('factions').select('id')
+    .eq('game_id', gameId).eq('profile_id', req.user.id).single();
+  if (!faction) return res.status(403).json({ error: 'Not a participant' });
+
+  const [{ data: queue }, { data: unitTypes }] = await Promise.all([
+    adminDb.from('production_queue')
+      .select('id, unit_type_id, factory_hex_q, factory_hex_r, quantity, created_turn, unit_type_config(name, mat_cost, man_cost, slots)')
+      .eq('game_id', gameId)
+      .eq('faction_id', faction.id)
+      .eq('status', 'pending'),
+    adminDb.from('unit_type_config')
+      .select('id, name, mat_cost, man_cost, slots, tags')
+      .eq('game_id', gameId)
+      .order('name'),
+  ]);
+
+  res.json({
+    queue: (queue ?? []).map(q => ({
+      id: q.id,
+      unit_type_id: q.unit_type_id,
+      unit_type_name: q.unit_type_config?.name,
+      mat_cost: q.unit_type_config?.mat_cost,
+      man_cost: q.unit_type_config?.man_cost,
+      slots: q.unit_type_config?.slots,
+      factory_hex_q: q.factory_hex_q,
+      factory_hex_r: q.factory_hex_r,
+      quantity: q.quantity,
+      created_turn: q.created_turn,
+    })),
+    unit_types: unitTypes ?? [],
+  });
+});
+
 // DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
 // GM can clear orders for any unit (for "view as player" and testing).
 router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {

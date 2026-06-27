@@ -50,9 +50,10 @@ function roll2d6() {
 
 // Defense bonus for a retreating unit in its original hex.
 // Uses the same stacking rules as combat.js (no elevation bonus — same-hex fire).
-function defenseBonus(unit, hex) {
+function defenseBonus(unit, hex, hasFortificationBuilding = false) {
   let bonus = 0;
   if (unit.fortification_level === 1) bonus += 1;
+  if (hasFortificationBuilding) bonus += 1;
   if (hex.has_heavy_vegetation) {
     bonus += 2;
   } else if (hex.has_light_vegetation) {
@@ -203,6 +204,20 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
     hexesByKey.set(hexKey(h.hex_q, h.hex_r), h);
   }
 
+  // Load fortification buildings for defense bonus during retreat fire.
+  const { data: fortBuildingRows } = await db
+    .from('buildings')
+    .select('hex_q, hex_r, current_hp, owner_faction_id')
+    .eq('game_id', gameId)
+    .eq('type', 'fortification');
+
+  const fortBuildingsByHex = new Map();
+  for (const b of fortBuildingRows ?? []) {
+    const k = hexKey(b.hex_q, b.hex_r);
+    if (!fortBuildingsByHex.has(k)) fortBuildingsByHex.set(k, []);
+    fortBuildingsByHex.get(k).push(b);
+  }
+
   // -------------------------------------------------------------------------
   // 4. Build working data structures.
   //
@@ -323,7 +338,10 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
       has_light_vegetation: false,
       has_heavy_vegetation: false,
     };
-    const bonus = defenseBonus(unit, hex);
+    const hasFortBuilding = (fortBuildingsByHex.get(originKey) ?? []).some(
+      b => b.current_hp > 0 && b.owner_faction_id === unit.faction_id
+    );
+    const bonus = defenseBonus(unit, hex, hasFortBuilding);
 
     for (const enemy of enemyUnitsInHex) {
       const eCfg = enemy.unitTypeCfg;
