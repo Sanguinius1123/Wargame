@@ -165,6 +165,68 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// POST /api/map/:gameId/production — queue unit production at a factory hex
+// Body: { unit_type_name, factory_hex_q, factory_hex_r, quantity? }
+router.post('/:gameId/production', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const { unit_type_name, factory_hex_q, factory_hex_r, quantity = 1 } = req.body;
+
+  // Find player's faction
+  const { data: faction } = await adminDb
+    .from('factions').select('id, materials, manpower')
+    .eq('game_id', gameId).eq('profile_id', req.user.id).single();
+  if (!faction) return res.status(403).json({ error: 'Not a participant' });
+
+  // Verify factory exists and belongs to player
+  const { data: factory } = await adminDb
+    .from('buildings')
+    .select('id, current_hp, max_hp')
+    .eq('game_id', gameId).eq('hex_q', factory_hex_q).eq('hex_r', factory_hex_r)
+    .eq('type', 'factory').eq('owner_faction_id', faction.id).single();
+  if (!factory || factory.current_hp < factory.max_hp) {
+    return res.status(400).json({ error: 'No operational factory at that hex' });
+  }
+
+  // Look up unit type for this game
+  const { data: unitType } = await adminDb
+    .from('unit_type_config').select('id, mat_cost, man_cost, slots')
+    .eq('game_id', gameId).eq('name', unit_type_name).single();
+  if (!unitType) return res.status(400).json({ error: `Unknown unit type: ${unit_type_name}` });
+
+  // Check factory slot capacity vs existing queue
+  const slots = Math.floor(factory.current_hp / 2);
+  const { data: existingQueue } = await adminDb
+    .from('production_queue').select('quantity, unit_type_config(slots)')
+    .eq('game_id', gameId).eq('faction_id', faction.id)
+    .eq('factory_hex_q', factory_hex_q).eq('factory_hex_r', factory_hex_r)
+    .eq('status', 'pending');
+  const usedSlots = (existingQueue ?? []).reduce((s, q) => s + (q.unit_type_config?.slots ?? 1) * q.quantity, 0);
+  const needed = unitType.slots * quantity;
+  if (usedSlots + needed > slots) {
+    return res.status(400).json({ error: `Factory only has ${slots - usedSlots} slot(s) free (need ${needed})` });
+  }
+
+  // Check and deduct resources
+  const totalMat = unitType.mat_cost * quantity;
+  const totalMan = unitType.man_cost * quantity;
+  if (faction.materials < totalMat) return res.status(400).json({ error: `Need ${totalMat} materials, have ${faction.materials}` });
+  if (faction.manpower < totalMan) return res.status(400).json({ error: `Need ${totalMan} manpower, have ${faction.manpower}` });
+
+  await adminDb.from('factions').update({
+    materials: faction.materials - totalMat,
+    manpower: faction.manpower - totalMan,
+  }).eq('id', faction.id);
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  const { data, error } = await adminDb.from('production_queue').insert({
+    game_id: gameId, faction_id: faction.id, unit_type_id: unitType.id,
+    factory_hex_q, factory_hex_r, quantity, created_turn: game.current_turn,
+  }).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data);
+});
+
 // DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
 router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
   const { data: unit } = await adminDb
