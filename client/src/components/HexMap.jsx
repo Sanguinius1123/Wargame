@@ -35,6 +35,15 @@ const BTN = {
   clear:   { background: '#7f1d1d', color: '#fca5a5' },
 };
 
+const ORDER_TYPE_LABELS = {
+  move:    'Move',
+  fortify: 'Fortify',
+  bombard: 'Bombard',
+  retreat: 'Retreat',
+  pursue:  'Pursue if Retreat',
+  repair:  'Repair',
+};
+
 export default function HexMap({ gameId, isGM = false }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -44,6 +53,9 @@ export default function HexMap({ gameId, isGM = false }) {
   const [moveMode, setMoveMode] = useState(false);
   const [movePath, setMovePath] = useState([]);
   const [selectedUnit, setSelectedUnit] = useState(null);
+
+  // Current queued orders for the selected unit
+  const [currentOrders, setCurrentOrders] = useState([]);
 
   const load = useCallback(async () => {
     const headers = await authHeader();
@@ -56,6 +68,19 @@ export default function HexMap({ gameId, isGM = false }) {
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
 
+  // Fetch orders for a given unit id; clears if null
+  const fetchOrders = useCallback(async (unitId) => {
+    if (!unitId) { setCurrentOrders([]); return; }
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/orders/${unitId}`, { headers });
+    if (r.ok) {
+      const d = await r.json();
+      setCurrentOrders(d.orders ?? []);
+    } else {
+      setCurrentOrders([]);
+    }
+  }, [gameId]);
+
   // Called when player clicks a hex in normal mode
   const handleSelect = useCallback((hex) => {
     setSelected(hex);
@@ -65,8 +90,10 @@ export default function HexMap({ gameId, isGM = false }) {
       // Exit move mode if they click a new hex without confirming
       setMoveMode(false);
       setMovePath([]);
+      setCurrentOrders([]);
+      fetchOrders(unit?.id ?? null);
     }
-  }, [isGM]);
+  }, [isGM, fetchOrders]);
 
   // Called when player clicks a hex while in move mode
   const handlePathClick = useCallback((hex) => {
@@ -83,13 +110,16 @@ export default function HexMap({ gameId, isGM = false }) {
     } else {
       setMovePath([]);
     }
+    setCurrentOrders([]);
     setMoveMode(true);
   }, [selectedUnit, selected]);
 
   const cancelMove = useCallback(() => {
     setMoveMode(false);
     setMovePath([]);
-  }, []);
+    // Restore orders display
+    fetchOrders(selectedUnit?.id ?? null);
+  }, [selectedUnit, fetchOrders]);
 
   const confirmMove = useCallback(async () => {
     if (!selectedUnit || movePath.length < 2) return;
@@ -104,6 +134,7 @@ export default function HexMap({ gameId, isGM = false }) {
     });
     setMoveMode(false);
     setMovePath([]);
+    setCurrentOrders([]);
     setSelectedUnit(null);
     setSelected(null);
     load();
@@ -118,8 +149,22 @@ export default function HexMap({ gameId, isGM = false }) {
     });
     setMoveMode(false);
     setMovePath([]);
+    setCurrentOrders([]);
     load();
   }, [selectedUnit, gameId, load]);
+
+  const fortifyUnit = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_id: selectedUnit.id, order_type: 'fortify' }),
+    });
+    // Reload orders
+    const r2 = await fetch(`${SERVER}/api/map/${gameId}/orders/${selectedUnit.id}`, { headers });
+    if (r2.ok) { const d = await r2.json(); setCurrentOrders(d.orders ?? []); }
+  }, [selectedUnit, gameId]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
@@ -154,6 +199,8 @@ export default function HexMap({ gameId, isGM = false }) {
               onConfirmMove={confirmMove}
               onCancelMove={cancelMove}
               onClearOrders={clearOrders}
+              onFortify={fortifyUnit}
+              currentOrders={currentOrders}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -181,6 +228,8 @@ function HexDetail({
   onConfirmMove,
   onCancelMove,
   onClearOrders,
+  onFortify,
+  currentOrders,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -195,11 +244,25 @@ function HexDetail({
     unitsByFaction[k].units.push(u);
   }
 
+  // Determine if hex is contested (units from 2+ factions)
+  const factionIds = [...new Set((hex.units ?? []).map(u => u.factionId))];
+  const isContested = factionIds.length >= 2;
+
   return (
     <div>
       <p style={{ color: '#94a3b8', fontSize: 11, marginBottom: 8 }}>
         Hex ({hex.hex_q}, {hex.hex_r}) · {vis === 'scouted' ? 'scouted' : 'visible'}
       </p>
+
+      {/* Locked in combat banner */}
+      {isContested && (
+        <div style={{
+          background: '#7f1d1d', border: '1px solid #ef4444', borderRadius: 4,
+          padding: '4px 8px', marginBottom: 8, color: '#fca5a5', fontSize: 12, fontWeight: 700,
+        }}>
+          ⚠ LOCKED IN COMBAT — only Retreat or Pursue orders valid
+        </div>
+      )}
 
       <p style={STAT_LABEL}>Terrain</p>
       <p style={STAT_VALUE}>{hex.terrain ?? '—'}</p>
@@ -218,6 +281,22 @@ function HexDetail({
                 {hex.has_road && <Tag label="Road" color="#94a3b8" />}
                 {hex.has_canal && <Tag label="Canal" color="#38bdf8" />}
               </div>
+            </div>
+          )}
+
+          {/* Buildings */}
+          {hex.buildings?.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <p style={STAT_LABEL}>Buildings</p>
+              {hex.buildings.map((b, i) => {
+                const pct = b.current_hp / b.max_hp;
+                const color = pct >= 1 ? '#22c55e' : pct >= 0.5 ? '#f59e0b' : '#ef4444';
+                return (
+                  <p key={i} style={{ color, fontSize: 12, marginBottom: 2 }}>
+                    {b.type.charAt(0).toUpperCase() + b.type.slice(1)} {b.current_hp}/{b.max_hp} HP
+                  </p>
+                );
+              })}
             </div>
           )}
 
@@ -247,6 +326,9 @@ function HexDetail({
               onConfirmMove={onConfirmMove}
               onCancelMove={onCancelMove}
               onClearOrders={onClearOrders}
+              onFortify={onFortify}
+              currentOrders={currentOrders}
+              isContested={isContested}
             />
           )}
 
@@ -357,8 +439,32 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
   );
 }
 
-function OrderPanel({ unit, moveMode, movePath, onEnterMoveMode, onConfirmMove, onCancelMove, onClearOrders }) {
+function OrderPanel({
+  unit,
+  moveMode,
+  movePath,
+  onEnterMoveMode,
+  onConfirmMove,
+  onCancelMove,
+  onClearOrders,
+  onFortify,
+  currentOrders,
+  isContested,
+}) {
   const hasPath = movePath.length >= 2;
+  const moveSteps = currentOrders.filter(o => o.order_type === 'move').length;
+
+  // Build a summary list of queued order types (deduplicated for non-move orders)
+  const orderSummary = [];
+  if (moveSteps > 0) {
+    orderSummary.push(`Move (${moveSteps} step${moveSteps !== 1 ? 's' : ''})`);
+  }
+  const nonMoveTypes = [...new Set(
+    currentOrders.filter(o => o.order_type !== 'move').map(o => o.order_type)
+  )];
+  for (const t of nonMoveTypes) {
+    orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
+  }
 
   return (
     <div style={{
@@ -387,6 +493,27 @@ function OrderPanel({ unit, moveMode, movePath, onEnterMoveMode, onConfirmMove, 
         )}
       </div>
 
+      {/* Queued orders display (only when not in move mode) */}
+      {!moveMode && orderSummary.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <p style={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}>Queued orders:</p>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+            {orderSummary.map((label, i) => (
+              <li key={i} style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>
+                • {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Contested notice */}
+      {isContested && !moveMode && (
+        <p style={{ color: '#fca5a5', fontSize: 11, marginBottom: 8 }}>
+          Locked in combat — only Retreat or Pursue orders are valid this turn.
+        </p>
+      )}
+
       {/* Move mode state */}
       {moveMode ? (
         <div>
@@ -408,10 +535,27 @@ function OrderPanel({ unit, moveMode, movePath, onEnterMoveMode, onConfirmMove, 
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button style={{ ...BTN.base, ...BTN.move }} onClick={onEnterMoveMode}>
+          <button
+            style={{ ...BTN.base, ...BTN.move, opacity: isContested ? 0.4 : 1 }}
+            disabled={isContested}
+            title="Move: Plot a movement path for this unit"
+            onClick={onEnterMoveMode}
+          >
             Move
           </button>
-          <button style={{ ...BTN.base, ...BTN.clear }} onClick={onClearOrders}>
+          <button
+            style={{ ...BTN.base, background: '#7c3aed', color: '#e2e8f0', opacity: isContested ? 0.4 : 1 }}
+            disabled={isContested}
+            title="Fortify: Dig in for +1 defense. Bonus persists until you move. Cancelled if enemies enter before completion."
+            onClick={onFortify}
+          >
+            Fortify
+          </button>
+          <button
+            style={{ ...BTN.base, ...BTN.clear }}
+            title="Clear Orders: Remove all queued orders for this unit this turn"
+            onClick={onClearOrders}
+          >
             Clear Orders
           </button>
         </div>
