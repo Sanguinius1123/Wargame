@@ -18,21 +18,24 @@ CREATE TABLE games (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   name          TEXT        NOT NULL,
   current_turn  SMALLINT    NOT NULL DEFAULT 1,
-  current_phase TEXT        NOT NULL DEFAULT 'orders' CHECK (current_phase IN ('orders', 'resolve', 'production')),
-  map_width     SMALLINT    NOT NULL DEFAULT 20,  -- hex columns
-  map_height    SMALLINT    NOT NULL DEFAULT 20,  -- hex rows
+  current_phase TEXT        NOT NULL DEFAULT 'orders'
+                CHECK (current_phase IN ('orders', 'phase1', 'phase2', 'phase3', 'phase4')),
+  map_width     SMALLINT    NOT NULL DEFAULT 20,
+  map_height    SMALLINT    NOT NULL DEFAULT 20,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE game_participants (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  game_id    UUID NOT NULL REFERENCES games(id)    ON DELETE CASCADE,
-  profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  role       TEXT NOT NULL DEFAULT 'player' CHECK (role IN ('gm', 'player', 'observer')),
+  id         UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  game_id    UUID    NOT NULL REFERENCES games(id)    ON DELETE CASCADE,
+  profile_id UUID    NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  role       TEXT    NOT NULL DEFAULT 'player' CHECK (role IN ('gm', 'player', 'observer')),
+  turn_ready BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE (game_id, profile_id)
 );
 
 -- Auto-create profile on email confirmation; assign GM role from whitelist.
+-- Also auto-adds GMs to all existing games.
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
@@ -45,7 +48,6 @@ BEGIN
     )
     ON CONFLICT (id) DO NOTHING;
 
-    -- Auto-add GMs to all existing games.
     IF EXISTS (SELECT 1 FROM gm_whitelist WHERE email = NEW.email) THEN
       INSERT INTO game_participants (game_id, profile_id, role)
       SELECT id, NEW.id, 'gm' FROM games
@@ -65,8 +67,11 @@ ALTER TABLE profiles          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE games             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE game_participants ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "profiles are public" ON profiles FOR SELECT USING (TRUE);
-CREATE POLICY "own profile writable" ON profiles FOR ALL USING (auth.uid() = id);
+CREATE POLICY "profiles are public"
+  ON profiles FOR SELECT USING (TRUE);
+
+CREATE POLICY "own profile writable"
+  ON profiles FOR ALL USING (auth.uid() = id);
 
 CREATE POLICY "participants read own games"
   ON games FOR SELECT
@@ -75,3 +80,7 @@ CREATE POLICY "participants read own games"
 CREATE POLICY "participants read own participation"
   ON game_participants FOR SELECT
   USING (profile_id = auth.uid());
+
+CREATE POLICY "gm writes game_participants"
+  ON game_participants FOR ALL
+  USING (is_gm_in_game(game_id));

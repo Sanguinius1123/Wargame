@@ -1,51 +1,41 @@
 -- =============================================================
--- 001_config.sql — Terrain and unit type config tables
--- All tunable values live here. Change a value = UPDATE row, not schema migration.
+-- 001_config.sql — Terrain type config + GM helper function
+-- All movement costs stored in ×3 scale (user value × 3) so that
+-- the 2/3 road multiplier resolves to clean integers.
+-- road_cost = terrain_cost × 2 in ×3 scale (= user value × 2)
+-- NULL cost = impassable (without road where noted)
 -- =============================================================
 
 CREATE TABLE terrain_type_config (
-  name         TEXT    PRIMARY KEY,
-  move_cost    SMALLINT NOT NULL DEFAULT 1,  -- movement points to enter
-  defense_bonus SMALLINT NOT NULL DEFAULT 0, -- added to defender strength
-  blocks_los   BOOLEAN  NOT NULL DEFAULT FALSE,
-  production   SMALLINT NOT NULL DEFAULT 0,  -- per hex per turn (× development)
-  manpower     SMALLINT NOT NULL DEFAULT 0   -- per hex per turn (× development)
+  name           TEXT     PRIMARY KEY,
+  elevation      SMALLINT NOT NULL DEFAULT 0,    -- 0=flat, 1=hills, 2=mountains
+  combat_mod     SMALLINT NOT NULL DEFAULT 0,    -- attack bonus for units fighting FROM this terrain
+  blocks_los     BOOLEAN  NOT NULL DEFAULT FALSE,
+  foot_cost      SMALLINT,                       -- NULL = impassable to foot (never happens per design)
+  mech_cost      SMALLINT,                       -- NULL = impassable to mechanized without road
+  naval_cost     SMALLINT,                       -- NULL = impassable to naval
+  foot_road_cost SMALLINT,                       -- road cost for foot; NULL = road doesn't help
+  mech_road_cost SMALLINT                        -- road cost for mechanized; NULL = road doesn't help
 );
 
-INSERT INTO terrain_type_config (name, move_cost, defense_bonus, blocks_los, production, manpower) VALUES
-  ('plains',    1, 0, FALSE, 1, 1),
-  ('forest',    2, 1, TRUE,  0, 0),
-  ('mountains', 3, 2, TRUE,  0, 0),
-  ('coast',     1, 0, FALSE, 1, 1),
-  ('sea',       1, 0, FALSE, 0, 0),  -- naval units only
-  ('urban',     1, 1, FALSE, 3, 2),
-  ('river',     2, 0, FALSE, 0, 0);
+-- All costs in ×3 scale. User-facing values: plains=1, hills=2, mountains=4, desert=2(mech=1), wetlands=2(mech=4), water=1(naval)
+-- Road cost = terrain_cost × 2 in ×3 scale
+INSERT INTO terrain_type_config
+  (name,        elevation, combat_mod, blocks_los, foot_cost, mech_cost, naval_cost, foot_road_cost, mech_road_cost)
+VALUES
+  ('plains',    0,         0,          FALSE,      3,         3,         NULL,       2,              2),
+  ('hills',     1,         1,          FALSE,      6,         6,         NULL,       4,              4),
+  ('mountains', 2,         2,          TRUE,       12,        NULL,      NULL,       8,              8),
+  ('desert',    0,         0,          FALSE,      6,         3,         NULL,       4,              2),
+  ('wetlands',  0,         -1,         FALSE,      6,         12,        NULL,       4,              8),
+  ('water',     0,         0,          FALSE,      NULL,      NULL,      3,          NULL,           NULL);
 
-CREATE TABLE unit_type_config (
-  id              UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            TEXT    NOT NULL UNIQUE,
-  category        TEXT    NOT NULL CHECK (category IN ('ground', 'naval', 'air')),
-  attack          SMALLINT NOT NULL DEFAULT 1,
-  defense         SMALLINT NOT NULL DEFAULT 1,
-  movement        SMALLINT NOT NULL DEFAULT 2,
-  los_range       SMALLINT NOT NULL DEFAULT 2,
-  attack_range    SMALLINT NOT NULL DEFAULT 1, -- 1 = adjacent only, 2 = artillery range
-  production_cost SMALLINT NOT NULL DEFAULT 2,
-  manpower_cost   SMALLINT NOT NULL DEFAULT 1,
-  is_buildable    BOOLEAN  NOT NULL DEFAULT TRUE,
-  is_stub         BOOLEAN  NOT NULL DEFAULT FALSE -- TRUE = air units, not yet implemented
-);
-
-INSERT INTO unit_type_config (name, category, attack, defense, movement, los_range, attack_range, production_cost, manpower_cost) VALUES
-  ('Infantry',   'ground', 2, 2, 2, 2, 1, 1, 2),
-  ('Armor',      'ground', 4, 2, 4, 3, 1, 3, 1),
-  ('Artillery',  'ground', 5, 1, 2, 2, 2, 4, 1),
-  ('Supply',     'ground', 0, 0, 3, 2, 1, 2, 1),
-  ('Destroyer',  'naval',  3, 2, 5, 4, 1, 3, 1),
-  ('Battleship', 'naval',  6, 4, 3, 4, 1, 6, 2),
-  ('Transport',  'naval',  0, 1, 4, 3, 1, 2, 1);
-
--- Air stubs — not yet implemented
-INSERT INTO unit_type_config (name, category, attack, defense, movement, los_range, attack_range, production_cost, manpower_cost, is_stub) VALUES
-  ('Fighter', 'air', 3, 2, 8, 6, 1, 4, 1, TRUE),
-  ('Bomber',  'air', 6, 1, 7, 4, 1, 5, 1, TRUE);
+-- Helper used by RLS policies in later migrations.
+-- Defined here because 003_map.sql and beyond depend on it.
+CREATE OR REPLACE FUNCTION is_gm_in_game(p_game_id UUID)
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM game_participants
+    WHERE game_id = p_game_id AND profile_id = auth.uid() AND role = 'gm'
+  );
+$$;
