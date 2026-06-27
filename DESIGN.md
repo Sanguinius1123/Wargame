@@ -277,7 +277,7 @@ Canals (`has_canal`) allow naval units to traverse Wetlands hexes. They have no 
 
 The supply truck does not enter the hex it is building into. It can build up to its maximum in a single turn (e.g. 3 plains road segments at 3 manpower total), or fewer if manpower is limited.
 
-**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a ground unit spending an action to demolish it. Roads reduce movement cost to **2/3 of normal terrain cost** (integer math via ×3 scale: road cost = terrain_cost × 2 in the internal scale).
+**Roads:** `has_road` is a tile tag only — not a structure. No HP. Can only be removed by a Supply truck spending its action to demolish it (same unit that builds them). Roads reduce movement cost to **2/3 of normal terrain cost** (integer math via ×3 scale: road cost = terrain_cost × 2 in the internal scale).
 
 | Terrain | Off-road | Road cost | Infantry (mv=2) off → road | Armor (mv=4) off → road |
 |---|---|---|---|---|
@@ -534,13 +534,13 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 ## Patrol
 
-Standing order for units that can engage in combat. Patrol is only available to units with a To-Hit stat — units that cannot attack (Supply, Scout Plane, Transport Plane, Transport ship) cannot be assigned patrol orders. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
+Standing order for units that can engage in combat. Patrol is only available to units with a To-Hit stat — units that cannot attack (Supply, Scout Plane, Transport Plane, Transport ship) cannot be assigned patrol orders. **Artillery is also excluded:** when a patrol unit intercepts it physically moves into the contested hex, and Artillery has 0 attack dice in close combat — it would be destroyed automatically. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
 
 **Patrol radius by unit type:**
 
 | Unit type | Patrol radius |
 |---|---|
-| Foot (Infantry, Artillery, AA Gun) | 1 — adjacent hexes only |
+| Foot (Infantry, AA Gun) | 1 — adjacent hexes only |
 | Mechanized (Armor) | 2 |
 | Naval (Destroyer, Frigate, Cruiser, Battleship, Carrier, Submarine) | 2 |
 | Air (Fighter) | See formula below |
@@ -579,7 +579,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
 | **Bombard** | Artillery, Battleship | Indirect fire at a specific hex at bombard range (Artillery: 1–8 hexes, 1 hex; Battleship: 1–8 hexes, 3-hex triangle). Artillery must be stationary. Artillery skips the Phase 3 ranged fire step; Battleship skips the Phase 2 naval ranged fire step. |
-| **Patrol** | any combat unit | Standing order. Unit intercepts detected enemies entering its patrol radius. Only available to units with a To-Hit stat. |
+| **Patrol** | any combat unit except Artillery | Standing order. Unit intercepts detected enemies entering its patrol radius. Only available to units with a To-Hit stat; Artillery excluded (intercept moves the unit into close combat where it has 0 attack dice). |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
 | **Flight Group (Scout)** | Scout Plane + optional Fighter escort | Fly path to gather LOS. Solo scout groups keep full stealth. LOS only reported if group returns home. |
@@ -622,7 +622,7 @@ When a unit moves into a hex occupied by an enemy, both sides stop and fight. Ex
 
 ### Naval Unit HP
 
-Naval units (Destroyer, Cruiser, Battleship, Transport, Carrier, Submarine) use **hit points** instead of quantity stacks. They are individual vessels, fewer in number but able to absorb damage before sinking.
+Naval units (Destroyer, Frigate, Cruiser, Battleship, Transport, Carrier, Submarine) use **hit points** instead of quantity stacks. They are individual vessels, fewer in number but able to absorb damage before sinking.
 
 | Unit | HP |
 |---|---|
@@ -714,6 +714,12 @@ otherwise → 1 casualty (ground) or 1 HP damage (naval)
 `defense_bonus` = sum of applicable terrain bonuses (see Terrain in Combat). Higher Defense = harder to kill. Penetration reduces effective defense.
 
 If `(Defense + defense_bonus − Penetration) < 2` → impossible to save (the minimum 2d6 roll of 2 can never succeed; all hits deal casualties).
+
+**Critical roll rules (override all stat calculations):**
+- **Natural 12 on an attack roll** (both dice show 6) → always a miss, even if To-Hit + combat_modifier ≥ 12.
+- **Natural 2 on a defense roll** (both dice show 1) → always a save, even if (Defense + defense_bonus − Penetration) < 2.
+
+These ensure every die roll carries a small chance of the unexpected outcome. No combination of stats or bonuses makes a hit certain or a save impossible.
 
 Both sides roll simultaneously. Casualties and HP damage are removed after both volleys fully resolve.
 
