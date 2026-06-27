@@ -55,10 +55,14 @@ CREATE TABLE factions (
   UNIQUE (game_id, profile_id)
 );
 
--- Wire faction FK onto hexes now that factions table exists.
+-- Wire faction FKs now that factions table exists.
 ALTER TABLE hexes
   ADD CONSTRAINT hexes_owner_faction_id_fkey
   FOREIGN KEY (owner_faction_id) REFERENCES factions(id) ON DELETE SET NULL;
+
+ALTER TABLE scouted_hexes
+  ADD CONSTRAINT scouted_hexes_faction_id_fkey
+  FOREIGN KEY (faction_id) REFERENCES factions(id) ON DELETE CASCADE;
 
 -- Unit stacks. One row per (faction, unit_type, hex). Ground units auto-merge.
 -- Naval units and bombers use hp; ground/fighter units use quantity.

@@ -40,10 +40,11 @@ CREATE POLICY "gm writes hexes"
 -- Historical record of which hexes each faction has ever seen.
 -- "Scouted" is an internal DB concept: terrain is shown on dark hexes the player has visited.
 -- It is NOT a display state — only Visible / Dark exist in the client.
+-- faction_id FK wired in 004 after factions table is created
 CREATE TABLE scouted_hexes (
   id                UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
-  game_id           UUID     NOT NULL REFERENCES games(id)    ON DELETE CASCADE,
-  faction_id        UUID     NOT NULL REFERENCES factions(id) ON DELETE CASCADE,
+  game_id           UUID     NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  faction_id        UUID     NOT NULL,
   hex_q             SMALLINT NOT NULL,
   hex_r             SMALLINT NOT NULL,
   last_scouted_turn SMALLINT NOT NULL DEFAULT 0,
