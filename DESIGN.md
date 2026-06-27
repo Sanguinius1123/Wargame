@@ -24,9 +24,9 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 2. **AA Overwatch fires.** For each AA unit (AA Gun, Frigate, Battleship) with overwatch_skies behavior: fire once at each detected enemy flight group whose path passes within overwatch range. Stealth groups require a detection roll first — undetected groups pass through silently. Multiple AA units fire independently.
 3. **Patrol intercepts.** For each detected enemy flight group entering a patrol area: one combined battle involving all fighters and bombers present on both sides simultaneously. Escorts, patrol fighters, and bombers all roll at the same time — there is no sequential escort-first-then-bombers sequence. Casualties applied after all volleys. Multiple patrol zones = multiple separate battles in path order.
 4. **Casualties applied.** AA hits and intercept casualties resolved; destroyed aircraft removed.
-5. **Surviving bombers assigned to target phase:**
-   - Naval target (Attack Run against ships) → join Phase 2 naval combat
-   - Ground target (Bombing Run or Attack Run against land units/infra) → join Phase 3 ground combat
+5. **Surviving bombers participate in their target phase(s):**
+   - **Attack Run** designates a single target hex → Phase 2 if targeting a naval hex; Phase 3 if targeting a ground hex.
+   - **Bombing Run** targets a 3-hex line. Bombers participate in **Phase 2** for any water hexes in the line and **Phase 3** for any land hexes. A Bombing Run spanning both domains participates in both phases — Phase 2 casualties reduce the group before Phase 3 attacks resolve.
 
 ---
 
@@ -35,7 +35,7 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 Naval movement is path-based, not jump-to-destination. Ships process their movement one step at a time, and contact with enemies interrupts movement mid-path.
 
 1. **Naval units begin movement.** Ships step through their movement paths one hex at a time. After each hex moved, Battleships on **Overwatch Fire** check whether a detected enemy surface ship (not submarine) entered their overwatch cone — if yes, fire 3 dice at that ship immediately (To-Hit 7, Pen 2). The enemy ship is **not stopped** — it takes HP damage and continues. Each Battleship fires overwatch at most once per Phase 2.
-2. **Contact check per step.** After each hex moved, check: is this ship now in the same hex as, or adjacent to, any enemy ship? If yes → stop, fight, then continue with remaining movement points.
+2. **Contact check per step.** After each hex moved, check: is this ship now within its **Atk Range** of any enemy ship? If yes → stop, fight, then continue with remaining movement points. Ships with Atk Range 1 (Destroyer, Frigate, Carrier, Submarine) are stopped when adjacent; Cruiser (range 2) stops within 2 hexes; Battleship (range 3) stops within 3 hexes.
 3. **Detection rolls (per engagement).** Before each naval combat, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
 4. **Naval combat resolves.** All ships present (both sides, all factions at war) roll simultaneously. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. All HP damage applied after volleys.
 5. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
@@ -46,7 +46,10 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
 
 ### Phase 3 — Ground
 
-1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. When a unit enters a hex containing enemy units, both sides stop and ground combat triggers immediately in that hex. If the attacker wins (all defenders wiped), it may continue its remaining movement. If both sides survive, the attacker's movement ends. See Movement and Combat Interaction for crossing (swap hex) rules.
+1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 3. Units that move within range of enemies without entering their hex are NOT forced to engage; they may trigger Overwatch fire (see below). Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules.
+
+   **Overwatch Fire fires during this step.** Any unit with an active Overwatch order fires at the first detected enemy that enters its overwatch cone during movement. Fires immediately when triggered — damage is applied before the moving unit's next step. Uses the unit's standard To-Hit, Pen, and all attack dice; vs units only (no infra roll). Fires at most once per turn per unit. A unit is cancelled from overwatch if an enemy enters its own hex this same step (it fights in close combat instead). Overwatch casualties are applied before step 3 close combat resolves.
+
 2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
 3. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
@@ -197,7 +200,8 @@ Units have a combination of tags that describe what they are, what they can do, 
 | Tag | Meaning |
 |---|---|
 | `ground` | Can move on land terrain |
-| `mobile` | Fast; higher movement stat; maneuverable |
+| `mobile` | Fast; higher movement stat; maneuverable. Not synonymous with mechanized — cavalry, eagle riders, etc. are mobile but not mechanized. |
+| `mechanized` | Motorized vehicle. Uses the mechanized terrain cost column. Cannot enter Mountains without a road; cannot enter hex with `has_heavy_vegetation`. All mechanized units are also mobile. |
 | `armored` | Tough; high defense; absorbs punishment (land units use quantity stacks, not HP) |
 | `heavy` | Heavy firepower; specialized destructive capability; often ranged |
 | `naval` | Can move on Water |
@@ -217,10 +221,10 @@ Units have a combination of tags that describe what they are, what they can do, 
 | Unit | Tags |
 |---|---|
 | Infantry | ground |
-| Armor | ground + mobile + armored |
+| Armor | ground + mobile + armored + mechanized |
 | Artillery | ground + heavy |
 | AA Gun | ground + air + heavy |
-| Supply | ground + mobile |
+| Supply | ground + mobile + mechanized |
 | Fighter | air |
 | Scout Plane | air + mobile + stealth |
 | Bomber | air + heavy |
@@ -241,7 +245,9 @@ Units have a combination of tags that describe what they are, what they can do, 
 
 Costs are stored internally on a **×3 scale** (all movement stats and terrain costs multiplied by 3) so that the 2/3 road multiplier resolves as integers. User-facing values below; engine values = user value × 3.
 
-**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder. Every ground unit can always enter at least 1 hex — no terrain cost alone makes a ground hex impassable to a foot unit.
+**Foot vs mechanized:** Ground units with the `mechanized` tag use the **mechanized** terrain cost column. All other ground units (Infantry, Artillery, AA Gun) use the **foot** column. In a non-modern setting, cavalry would be mobile-but-not-mechanized and could use a separate cavalry cost column if defined.
+
+**Movement formula:** `hexes = max(1, ceil(movement / cost))`. If any movement points remain after taking the maximum whole hexes, the unit can always enter one more hex, spending the remainder. Foot units can always enter at least 1 hex — no terrain cost alone makes a ground hex impassable to a foot unit. Mechanized units may be categorically blocked (Mountains without road, `has_heavy_vegetation`).
 
 | Terrain | foot | mechanized | naval | air |
 |---|---|---|---|---|
@@ -299,7 +305,7 @@ All ground units of the same faction in a hex form a single stack and act togeth
 
 ### Naval Landing
 
-Transport ships (naval + ground) offload ground units to adjacent land hexes. Ground units enter the land hex at cost 1 movement. Transport capacity: **6 slots**. Each unit currently occupies 1 slot (subject to change; some units may occupy 2).
+Transport ships (naval + ground) offload ground units to adjacent land hexes at the end of Phase 2. Offloading **consumes the entire turn's movement** for the ground units — they land in the hex and cannot move further in Phase 3. They may be engaged in Phase 3 ground combat or hit by overwatch/bombardment. Transport capacity: **6 slots**. Each unit currently occupies 1 slot (subject to change; some units may occupy 2).
 
 **If a Transport sinks while carrying ground units:**
 - If the Transport is NOT adjacent to a land hex: all aboard are destroyed.
@@ -437,9 +443,10 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 ### Submarine Rules
 
 - LOS = 0. Completely blind visually.
-- Detects via sonar (detection stat) only.
+- Detects via sonar (detection stat) only. **Sonar range: 4 hexes.** Cannot detect anything beyond 4 hexes regardless of formula.
 - Can only detect naval surface units — not ground, not air. Air units cannot detect or attack submarines either.
 - Contributes no fog-of-war vision to its faction beyond its own hex.
+- **Destroyer sonar range: 3 hexes.** Destroyers can only detect submarines within 3 hexes. Beyond 3 hexes, detection is impossible. The standard detection formula applies within that range.
 
 **One-sided submarine combat:** if a submarine detects a surface ship but the surface ship fails its detection roll, the submarine attacks and the surface ship cannot fire back. The surface ship receives a battle report: "attacked by undetected submarine(s)" — it knows it was hit but does not know the submarine's exact position.
 
@@ -491,10 +498,10 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 - Player designates a destination hex. Fighter escorts engage any enemy fighters along the path (normal intercept rules).
 - Bombers search for detected enemy units within **3 hexes of the destination** (large search area).
 - **Target allocation** — assign bombers to detected targets using stack-priority algorithm:
-  1. Sort detected targets by unit count, largest first.
-  2. Assign `min(remaining_bombers, target_unit_count)` bombers to each target in order.
+  1. Sort detected targets by **total effective HP** (ground = unit count, each unit counts as 1; naval = sum of actual HP of all ships in that group). Largest first.
+  2. Assign `min(remaining_bombers, target_effective_hp)` bombers to each target in order.
   3. If bombers remain after one pass, repeat from the top until all bombers are assigned.
-  - *Examples: 10 bombers vs a 10-stack + 5-stack → all 10 bomb the 10-stack. 10 bombers vs a 9-stack + 6-stack → 9 bomb the 9-stack, 1 bombs the 6-stack. 10 bombers vs 5 single-unit tiles → 2 bombers per tile.*
+  - *Examples (ground): 10 bombers vs a 10-stack + 5-stack → all 10 bomb the 10-stack. 10 bombers vs 5 single-unit tiles → 2 bombers per tile. (Naval): 10 bombers vs a Battleship (12 HP) + 3 Destroyers (6 HP each = 18 HP) → all 10 bomb the destroyer group.*
 - Each assigned bomber makes **1 attack roll** against its target hex (To-Hit 7, Pen 1 vs units only — no infrastructure roll).
 - Normal defense save applies per hit. Bombers return to base after attacking.
 - If no units are detected within 3 hexes of destination, the run is wasted.
@@ -538,7 +545,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 
 **Patrol engages every contact** — each detected enemy entering the patrol area triggers a separate engagement. Casualties apply immediately before the next engagement. For air, this means sending a fighter sweep first to attrit the patrol, then following with bombers, is a valid tactic.
 
-**Ground patrol:** patrolling foot/mechanized units move out (up to their patrol radius) to intercept and stop enemy ground units that enter their patrol area. The patrolling unit must have LOS to the enemy to react. Intercepted enemy movement stops; ground combat triggers in the hex where contact is made.
+**Ground patrol:** the patrolling unit moves to intercept when a detected enemy enters its patrol area (LOS required to react). The patrolling unit moves into the hex the enemy tried to enter and close combat triggers there. After combat: if the patrol unit wins (enemy wiped), the patrol unit stays in that hex; the patrol order is complete for this turn. If the enemy wins (patrol unit wiped), the enemy continues movement from that hex with remaining movement points. If both survive, the enemy is pushed back to the hex it came from; the patrol unit remains in the intercepted hex.
 
 **Naval patrol:** patrolling ships move out (up to patrol radius 2) to intercept enemy ships that enter their patrol area. Contact follows the same rules as normal naval movement contact — ships stop, fight, then survivors continue. LOS applies; ships must detect the contact to react. Detection rolls apply as normal for submerged submarines.
 
@@ -554,7 +561,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
 | **Bombard** | Artillery, Battleship | Attack target hex at range. Artillery must be stationary. |
-| **Overwatch Fire** | Artillery, Battleship | Standing order. Designate cone direction (one of 6 flat-top hex directions). Fires automatically vs first detected enemy entering cone each turn. Cancels if unit engaged in close combat (Artillery) or naval combat (Battleship). |
+| **Overwatch Fire** | Any unit with Atk Range > 0 | Standing order. Designate cone direction (one of 6 flat-top hex directions) and max range up to min(Atk Range, 4). Fires 1 attack roll (all dice for multi-die units) vs units only at first detected enemy entering cone each turn. Uses unit's standard To-Hit and Pen. Cancels if unit engaged in close combat before trigger (ground) or naval combat (Battleship). Artillery and Battleship have additional specific rules — see Bombardment section. |
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
@@ -575,7 +582,9 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | naval (surface) | naval (surface) only | 2 |
 | submarine | naval (surface) only | 2 |
 | air fighter | air (intercept) | 1 |
-| air bomber | ground + naval surface (strike) | 3 |
+| air bomber (Attack Run vs naval) | naval surface | 2 |
+| air bomber (Bombing Run or Attack Run vs ground) | ground + naval surface | 3 |
+| air bomber (Bombing Run spanning water + land) | naval surface (Phase 2) + ground (Phase 3) | 2 and 3 |
 | AA Gun (ground combat) | ground only | 3 |
 | AA Gun (Overwatch Skies) | air only | 1 |
 | Frigate (surface combat) | naval (surface) only | 2 |
@@ -770,7 +779,7 @@ Intercept is one combined simultaneous battle. All units on both sides roll at t
 | Unit in intercept | To-Hit | Notes |
 |---|---|---|
 | Fighter | 7 | Fires at all opposing units proportionally |
-| Bomber (tail gun) | 4 | Fires at all opposing units proportionally; low accuracy |
+| Bomber (tail gun) | 5 | Fires at all opposing units proportionally |
 
 Each die is earmarked for a target unit type (via proportional fire calculation) before the attack roll is made, then the defense roll is made against that unit type's defense stat.
 
@@ -816,7 +825,7 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 
 **Artillery Overwatch Fire** (standing order — player must set this up explicitly)
 
-Player designates a cone: one of the 6 flat-top hex directions (E, NE, NW, W, SW, SE). The cone widens by 1 hex per range step:
+Uses the general Overwatch Fire rules (see Orders section). Artillery fires **1 die** vs units (To-Hit 7, Pen 2, no infra roll) at the first detected enemy ground unit entering its cone during Phase 3 movement. Cone geometry — player designates one of 6 flat-top hex directions (E, NE, NW, W, SW, SE); max overwatch range 4:
 
 | Range | Hexes in cone |
 |---|---|
@@ -825,7 +834,7 @@ Player designates a cone: one of the 6 flat-top hex directions (E, NE, NW, W, SW
 | 3 | 4 |
 | 4 | 5 (max) |
 
-When a detected enemy ground unit enters any hex in the cone during Phase 3: artillery fires **1 die** vs units (To-Hit 7, Pen 2, no infra roll) at that hex. Fires **once per turn** — only the first detected enemy triggering the cone receives fire that turn. Subsequent units entering the cone that turn are ignored. Cancelled if the artillery is engaged in close combat in its own hex before the trigger fires.
+This cone table applies to all unit Overwatch orders. Fires once per turn. Cancelled if the artillery is engaged in close combat in its own hex before the trigger fires.
 
 **Battleship**
 - Directed bombardment range: up to **8 hexes**. May move and bombard in the same turn; cancelled if engaged in naval combat that turn.
@@ -835,7 +844,7 @@ When a detected enemy ground unit enters any hex in the cone during Phase 3: art
 
 **Battleship Overwatch Fire** (standing order — player must set this up explicitly)
 
-Same cone geometry as Artillery Overwatch (player picks direction, range up to 4, 2/3/4/5 hexes per ring). Fires **3 dice** at the first detected enemy triggering the cone.
+Uses the general Overwatch Fire rules (see Orders section). Same cone geometry as Artillery Overwatch (range up to 4, 2/3/4/5 hexes per ring). Fires **3 dice** at the first detected enemy triggering the cone.
 
 Two separate triggers per turn — both can fire in the same turn if the Battleship is not engaged in full naval combat:
 
@@ -878,7 +887,7 @@ Stealth units are invisible until detected — they do not appear on enemy maps 
 | Blind bombardment | No report | No report |
 | Flight group destroyed | — | No report |
 
-**Partial intel (in battle, no external LOS):** When your units fought but you had no observer in LOS range, you know your own losses exactly. For each enemy unit that participated, roll independently: **2/3 chance (67%)** that unit appears in your battle report. Units that fail the roll are not reported — you know a battle occurred and what you lost, but your picture of the enemy force is incomplete.
+**Partial intel (in battle, no external LOS):** When your units fought but you had no observer in LOS range, you know your own losses exactly. For each **individual enemy unit** (each unit of quantity, not each unit type), roll independently: **2/3 chance (67%)** that unit appears in your battle report. Units that fail the roll are not reported. Example: enemy has 10 infantry remaining — expect ~6–7 to appear in the report; the other 3–4 are "undetected." You know a battle occurred and what you lost, but your count of the enemy force is imprecise.
 
 ---
 
@@ -919,6 +928,8 @@ Manpower not spent during the ordering phase is wasted.
 
 `production_queue`: game_id, faction_id, unit_type_id, quantity, turn_queued, status (`pending` → `ready` → `placed`).
 
+**If a facility is captured in Phase 3:** all units in its production queue that have not yet been placed are lost. Defenders are assumed to destroy them before ceding the facility. No refund.
+
 **Production capacity:**
 - All units produced at Manufacturing Facility. Slots per turn = `floor(current_hp / 2)`. Full facility (20 HP) = 10 slots. Damaged to 10 HP = 5 slots. Destroyed = 0.
 - Each unit costs `ceil(mat_cost / 2)` production slots (see Slots column in unit stats).
@@ -945,7 +956,7 @@ Manpower not spent during the ordering phase is wasted.
 - Air unit capacity: **4 slots**. Can carry Fighters and Scout Planes (1 slot each). Cannot carry Bombers.
 - Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
 - Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
-- Air units produced at a Manufacturing Facility with adjacent Airbase may spawn aboard a Carrier within adjacent range of that Airbase.
+- Air units produced at a Manufacturing Facility with adjacent Airbase may spawn on any Carrier, Airbase, or Airstrip within **5 hexes** of that Airbase. The Airbase adjacent to the Manufacturing Facility is still required for production.
 
 **If the Carrier sinks (Phase 2):**
 - Air units mid-mission (launched in Phase 1): in Phase 4, they attempt to land at the nearest friendly airstrip or airbase within remaining movement. If none reachable → crash and destroyed.

@@ -55,8 +55,8 @@ Full game design: `DESIGN.md`
 - **Unit roster:** Infantry, Armor, Artillery, AA Gun, Supply (ground); Fighter, Scout Plane, Bomber, Transport Plane (air); Destroyer, Frigate, Cruiser, Battleship, Transport (ship), Carrier, Submarine (naval).
 
 ### Movement
-- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Ground movement is **step-by-step**: units advance one hex at a time, stop on contact with enemies. Winner may continue remaining movement.
-- **Mountains impassable for mechanized** without a road. Foot can always enter any ground terrain.
+- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Ground movement is **step-by-step**: units advance one hex at a time. **Forced contact (ground) = entering same hex.** Adjacent units can fire voluntarily (range-1 fire) without forced engagement. **Naval contact = within Atk Range** (Destroyer/Frigate/Carrier/Sub stop when adjacent; Cruiser stops at 2; Battleship stops at 3). Winner of forced contact may continue remaining movement.
+- **`mechanized` tag** (Armor, Supply) determines mechanized terrain costs. `mobile` alone does not mean mechanized (cavalry, eagle riders = mobile but foot costs). Mountains impassable for mechanized without road; `has_heavy_vegetation` impassable for mechanized. Foot units can always enter any ground terrain.
 - **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale).
 - **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
 - **Canals:** `has_canal` allows naval through Wetlands. 10 manpower, supply truck present (not consumed).
@@ -68,7 +68,7 @@ Full game design: `DESIGN.md`
 - **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
 - **Artillery:** Range 1–8. Stationary. Cannot bombard if engaged in close combat (enemies in own hex). 0 attack dice in direct combat — destroyed automatically if alone against enemies.
 - **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, range 1–8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, directed range 8). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
-- **Overwatch Fire:** Standing order for Artillery and Battleship. Player designates a directional cone (flat-top hex: one of 6 directions; range 4 max; 2/3/4/5 hexes at ranges 1–4). Fires automatically vs first detected enemy entering cone per turn. Artillery: 1 die, To-Hit 7, Pen 2. Battleship: 3 dice, To-Hit 7, Pen 2 — fires in Phase 2 vs surface ships (not subs, ship not stopped) AND Phase 3 vs ground units. Cancelled if engaged in close/naval combat before trigger.
+- **Overwatch Fire:** Available to **any unit with Atk Range > 0**. Standing order. Player designates directional cone (flat-top hex, 6 directions, range up to min(Atk Range, 4); 2/3/4/5 hexes at ranges 1–4). Fires all attack dice at first detected enemy entering cone per turn. Standard To-Hit and Pen. Vs units only (no infra roll). Fires during Phase 3 movement step before close combat. Cancelled if unit enters close combat same step. Battleship: special dual-phase — fires in Phase 2 vs surface ships (ship not stopped) AND Phase 3 vs ground. Cone geometry (2/3/4/5 hexes at ranges 1–4) applies to all units.
 - **Artillery in direct combat:** 0 attack dice. Destroyed automatically if left alone vs enemies.
 
 ### Detection & Fog of War
@@ -81,7 +81,7 @@ Full game design: `DESIGN.md`
 ### Air System
 - **Flight group system:** Air actions use flight groups (not individual orders). Fighters (escort) + Bombers (strike) + Scout Planes (LOS). AA fires before patrol intercepts.
 - **Intercept combat:** One combined simultaneous battle — all fighters and bombers on both sides roll at once. No sequential escort-first-then-bombers.
-- **Bomber routing:** After Phase 1, surviving bombers assigned to Phase 2 (naval target) or Phase 3 (ground target).
+- **Bomber routing:** Attack Run → Phase 2 (naval hex target) or Phase 3 (ground hex target). Bombing Run spanning both water and land → Phase 2 for water hexes, Phase 3 for land hexes; same group participates in both, Phase 2 casualties reduce count before Phase 3.
 - **Patrol radius (air):** `floor((movement − 2 × distance_to_patrol_center) / 6)`. Fighter at home airbase = radius 5.
 - **Naval AA (Overwatch Skies):** Frigate (To-Hit 7, Pen 1, Range 3). Battleship (To-Hit 6, Pen 0, Range 1 — point defense only). Land AA Gun (To-Hit 7, Pen 0, Range 2). AA hits in flight groups distributed proportionally by unit type count.
 
@@ -100,14 +100,17 @@ Full game design: `DESIGN.md`
 - **Phase 4 order:** Air return → Materials collected → Production queue advances → Settlement control evaluated → Manpower calculated → Win condition check → Reset.
 
 ### Patrol
-- **Ground patrol:** Foot radius 1, mechanized radius 2. Unit moves to intercept enemies entering patrol area (LOS required to react).
-- **Naval patrol:** Radius 2. Ships move to intercept enemy ships entering patrol area.
+- **Ground patrol:** Foot radius 1, mechanized radius 2 (radius uses `mechanized` tag). LOS required. Patrol unit moves to the hex the enemy tried to enter and fights there. If patrol wins → enemy pushed back, patrol stays in intercepted hex. If enemy wins → enemy continues movement. If both survive → enemy retreats, patrol stays.
+- **Naval patrol:** Radius 2. Same intercept logic as ground patrol.
 - **Air patrol:** Formula-based radius. Each detected enemy flight group triggers separate intercept combat.
 
 ### Orders
 - **Fortify:** Any ground unit. One uninterrupted turn → +1 defense bonus. Cancelled if engaged before completion. Bonus persists until unit moves. Stacks with terrain and Fortification building bonus.
 - **Repair:** Naval at Harbor, air at Airbase. Only when damaged. Uses 1 repair slot.
-- **Overwatch Fire:** Artillery or Battleship. Standing order, explicit setup. Player sets cone direction. See Bombardment section.
+- **Overwatch Fire:** Any unit with Atk Range > 0. Standing order, explicit setup. Fires during Phase 3 movement (before close combat) or Phase 2 (Battleship vs ships). See Orders + Bombardment sections.
+- **Naval landing:** Offloading consumes ground units' entire movement for the turn. They land and cannot move in Phase 3 (but can be attacked).
+- **Production queue:** Lost entirely if the production facility is captured in Phase 3. No refund.
+- **Sonar ranges:** Submarine sonar range 4 hexes; Destroyer sonar range 3 hexes (hard caps; detection formula applies within range).
 
 ## Schema
 
@@ -125,8 +128,9 @@ supabase/migrations/
                                   road_manpower_per_segment, combat_modifier, blocks_los, elevation
                                 - unit_type_config: overhaul all stats — tags, to_hit, defense,
                                   penetration, def_to_hit, hp (naval + bombers), stealth_rating,
-                                  detection_rating, overwatch_to_hit, overwatch_pen, overwatch_range,
-                                  move, los, atk_range, mat_cost, man_cost, slots, carrier_slots
+                                  detection_rating, sonar_range, overwatch_to_hit, overwatch_pen,
+                                  overwatch_range, move, los, atk_range, mat_cost, man_cost,
+                                  slots, carrier_slots
                                 - hexes: add has_light_vegetation, has_heavy_vegetation, has_urban,
                                   has_settlement, has_road, has_railroad(stub), has_airstrip,
                                   has_airbase, has_harbor, has_bridge, has_canal
