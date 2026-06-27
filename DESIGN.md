@@ -226,7 +226,7 @@ Units have a combination of tags that describe what they are, what they can do, 
 | Artillery | ground + heavy |
 | AA Gun | ground + air + heavy |
 | Supply | ground + mobile + mechanized |
-| Commando | ground + stealth |
+| Recon | ground + stealth |
 | Fighter | air |
 | Scout Plane | air + mobile + stealth |
 | Bomber | air + heavy |
@@ -299,7 +299,7 @@ Roads connect visually: adjacent road tiles draw a road line between them, inclu
 | `has_light_vegetation` | +0 | +2 | no effect | no effect |
 | `has_heavy_vegetation` | +2 | impassable | no effect | no effect |
 
-*Exception: Commandos ignore the `has_heavy_vegetation` movement penalty — they enter at base terrain cost with no +2 addition.*
+*Exception: Recon units ignore the `has_heavy_vegetation` movement penalty — they enter at base terrain cost with no +2 addition.*
 | `has_urban` | +0 | +1 | no effect | no effect |
 | `has_airstrip` / `has_airbase` | no effect | no effect | no effect | required to land |
 
@@ -473,9 +473,9 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 
 ### Stealth Unit Firing
 
-**Firing while undetected:** When a stealth unit fires (ranged fire step or close combat) against a faction that has not yet detected it this turn, that faction immediately makes a bonus detection roll with **+2 to detection score** against the firing unit. If the roll succeeds, the unit's position is revealed for the start of next turn — not in time to fire back this turn. This applies to all stealth units (currently Commando and Submarine).
+**Firing while undetected:** When a stealth unit fires (ranged fire step or close combat) against a faction that has not yet detected it this turn, that faction immediately makes a bonus detection roll with **+2 to detection score** against the firing unit. If the roll succeeds, the unit's position is revealed for the start of next turn — not in time to fire back this turn. This applies to all stealth units (currently Recon and Submarine).
 
-**Hold Fire** (Commando and Submarine): standing order that prevents initiating fire in the ranged fire step. The unit will still fire back if it receives incoming fire in that same step. Useful for staying dark — not firing means no position reveal, and detection re-rolls each turn. A Commando on Hold Fire always fights normally in close combat. See Orders table.
+**Hold Fire** (Recon and Submarine): standing order that prevents initiating fire in the ranged fire step. The unit will still fire back if it receives incoming fire in that same step. Useful for staying dark — not firing means no position reveal, and detection re-rolls each turn. A Recon unit on Hold Fire always fights normally in close combat. See Orders table.
 
 ### Stealth by Unit Type
 
@@ -486,7 +486,7 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 | Artillery | 0 | 2 | |
 | AA Gun | 0 | 4 | Specialized sensors |
 | Supply | 0 | 1 | |
-| Commando | 3 | 3 | Ignores heavy veg move penalty; Hold Fire available; Sabotage ability |
+| Recon | 3 | 3 | Ignores heavy veg move penalty; Hold Fire available; Sabotage ability |
 | Fighter | 0 | 3 | Airborne radar |
 | Scout Plane | 4 | 4 | High stealth + good detection |
 | Bomber | 0 | 2 | |
@@ -596,7 +596,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Wait Turn** | ground, naval | Explicitly skip this turn. After the turn resolves, the unit returns to the orders panel (prompts for new orders next turn). |
 | **Bombard** | Artillery, Battleship | Indirect fire at a specific hex at bombard range (Artillery: 1–8 hexes, 1 hex; Battleship: 1–8 hexes, 3-hex triangle). Artillery must be stationary. Artillery skips the Phase 3 ranged fire step; Battleship skips the Phase 2 naval ranged fire step. |
 | **Patrol** | see Patrol section | Standing order. Unit intercepts detected enemies entering its patrol radius. Requires a To-Hit stat AND the ability to fight at range 0 (close combat). |
-| **Hold Fire** | Commando, Submarine | Standing order. Unit will not initiate fire in the ranged fire step. Fires back if it receives incoming fire in that same step. Commando always fights in close combat regardless. Firing while undetected triggers a +2 bonus detection roll for the enemy — see Stealth Unit Firing. |
+| **Hold Fire** | Recon, Submarine | Standing order. Unit will not initiate fire in the ranged fire step. Fires back if it receives incoming fire in that same step. Recon always fights in close combat regardless. Firing while undetected triggers a +2 bonus detection roll for the enemy — see Stealth Unit Firing. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
 | **Flight Group (Scout)** | Scout Plane + optional Fighter escort | Fly path to gather LOS. Solo scout groups keep full stealth. LOS only reported if group returns home. |
@@ -792,15 +792,15 @@ Ground:
 | Artillery | 7 | 4 | 2 | 2 | 3 | 2 | 4 | 2 | 2 |
 | AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
-| Commando | 7 | 6 | 0 | 2 | 4 | 2 | 2 | 1 | 1 |
+| Recon | 7 | 6 | 0 | 3 | 4 | 2 | 2 | 1 | 1 |
 
 **Atk Range** = direct fire range used in the ranged fire step and close combat. Artillery also has a **Bombard** special ability (indirect fire, range 8, 1 hex target) — see Bombardment section. Units on a Bombard order skip the Phase 3 ranged fire step.
 
-**Commando special rules:**
-- **Stealth:** stealth 3, detection 3. See Stealth by Unit Type table. Defense is stealth — commandos survive by not being found, not by absorbing hits.
+**Recon special rules:**
+- **Stealth:** stealth 3, detection 3. See Stealth by Unit Type table. Defense is stealth — Recon units survive by not being found, not by absorbing hits.
 - **Vegetation immunity:** ignores the `has_heavy_vegetation` movement penalty. Moves through heavy vegetation at base terrain cost.
-- **Hold Fire:** standing order. Commando skips the Phase 3 ranged fire step and will not initiate fire. If the commando receives incoming fire in the ranged fire step (detected and targeted by an enemy), it fires back in that same simultaneous volley. Always fights normally in close combat.
-- **Sabotage:** takes the commando's entire turn (no movement). Targets a hex **adjacent** to the commando's hex. Effects: roads/canals set to false (destroyed); buildings, urban tiles, bridges lose 2 HP (no defense roll). Not reported to the enemy unless an enemy unit has LOS to the target hex at the moment of sabotage — if unseen, the owning player sees the infrastructure damage but not its cause or origin.
+- **Hold Fire:** standing order. Recon skips the Phase 3 ranged fire step and will not initiate fire. If the Recon unit receives incoming fire in the ranged fire step (detected and targeted by an enemy), it fires back in that same simultaneous volley. Always fights normally in close combat.
+- **Sabotage:** takes the Recon unit's entire turn (no movement). Targets a hex **adjacent** to the Recon unit's hex. Effects: roads/canals set to false (destroyed); buildings, urban tiles, bridges lose 2 HP (no defense roll). Not reported to the enemy unless an enemy unit has LOS to the target hex at the moment of sabotage — if unseen, the owning player sees the infrastructure damage but not its cause or origin.
 
 Air:
 
