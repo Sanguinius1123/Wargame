@@ -249,8 +249,110 @@ function HexDetail({
               onClearOrders={onClearOrders}
             />
           )}
+
+          {/* GM hex editor */}
+          {isGM && (
+            <GMHexEditor hex={hex} gameId={gameId} onRefresh={onRefresh} />
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+const TERRAINS = ['plains', 'hills', 'mountains', 'desert', 'wetlands', 'water'];
+
+function GMHexEditor({ hex, gameId, onRefresh }) {
+  const [form, setForm] = useState({
+    terrain:              hex.terrain ?? 'plains',
+    has_settlement:       hex.has_settlement ?? false,
+    has_urban:            hex.has_urban ?? false,
+    urban_hp:             hex.urban_hp ?? 4,
+    has_light_vegetation: hex.has_light_vegetation ?? false,
+    has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
+    has_road:             hex.has_road ?? false,
+    has_canal:            hex.has_canal ?? false,
+    has_railroad:         hex.has_railroad ?? false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  // Reset form when selected hex changes
+  useEffect(() => {
+    setForm({
+      terrain:              hex.terrain ?? 'plains',
+      has_settlement:       hex.has_settlement ?? false,
+      has_urban:            hex.has_urban ?? false,
+      urban_hp:             hex.urban_hp ?? 4,
+      has_light_vegetation: hex.has_light_vegetation ?? false,
+      has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
+      has_road:             hex.has_road ?? false,
+      has_canal:            hex.has_canal ?? false,
+      has_railroad:         hex.has_railroad ?? false,
+    });
+    setMsg('');
+  }, [hex.hex_q, hex.hex_r]);
+
+  async function save() {
+    setSaving(true);
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/hexes/${hex.hex_q}/${hex.hex_r}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (r.ok) { setMsg('Saved.'); onRefresh(); } else { const d = await r.json(); setMsg(d.error ?? 'Error'); }
+  }
+
+  const chk = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.checked }));
+  const inp  = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
+
+  const iStyle = { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 3, padding: '4px 6px', color: '#e2e8f0', fontSize: 12, width: '100%', boxSizing: 'border-box' };
+  const rowStyle = { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 };
+  const lbl = { color: '#94a3b8', fontSize: 12 };
+
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
+      <p style={{ color: '#64748b', fontSize: 11, marginBottom: 8 }}>GM — Edit Hex</p>
+
+      <div style={{ marginBottom: 8 }}>
+        <div style={lbl}>Terrain</div>
+        <select style={iStyle} value={form.terrain} onChange={inp('terrain')}>
+          {TERRAINS.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+
+      {[
+        ['has_settlement',       'Settlement'],
+        ['has_urban',            'Urban tile'],
+        ['has_light_vegetation', 'Light vegetation'],
+        ['has_heavy_vegetation', 'Heavy vegetation'],
+        ['has_road',             'Road'],
+        ['has_canal',            'Canal'],
+        ['has_railroad',         'Railroad'],
+      ].map(([key, label]) => (
+        <div key={key} style={rowStyle}>
+          <input type="checkbox" checked={form[key]} onChange={chk(key)} id={key} />
+          <label htmlFor={key} style={lbl}>{label}</label>
+        </div>
+      ))}
+
+      {form.has_urban && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={lbl}>Urban HP (0–4)</div>
+          <input type="number" min={0} max={4} style={iStyle} value={form.urban_hp} onChange={inp('urban_hp')} />
+        </div>
+      )}
+
+      <button
+        onClick={save}
+        disabled={saving}
+        style={{ background: '#2563eb', border: 'none', borderRadius: 4, padding: '5px 14px', color: '#fff', fontSize: 12, fontWeight: 600, cursor: saving ? 'default' : 'pointer', marginTop: 4 }}
+      >
+        {saving ? 'Saving…' : 'Save Hex'}
+      </button>
+      {msg && <p style={{ color: '#94a3b8', fontSize: 11, marginTop: 6 }}>{msg}</p>}
     </div>
   );
 }
