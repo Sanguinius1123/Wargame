@@ -132,9 +132,9 @@ Resources are not produced by terrain type. They are produced by specific resour
 
 | Attribute | Description |
 |---|---|
-| `has_light_vegetation` | Blocks LOS†. No move penalty for foot; +2 for mechanized. Stealth +1 for all units. |
-| `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. |
-| `has_urban` | City environment. Stealth +2. +1 move cost for mechanized. Contributes to manpower for connected settlement. |
+| `has_light_vegetation` | Blocks LOS†. No move penalty for foot; +2 for mechanized. Stealth +1 for all units. Bombardment hit → 1d6: 4+ → cleared entirely. |
+| `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. Bombardment hit → 1d6: 4+ → becomes `has_light_vegetation`. |
+| `has_urban` | City environment. **4 HP.** Stealth +2. +1 move cost for mechanized. At 3–4 HP: produces manpower. At 1–2 HP: damaged — produces no manpower. At 0 HP: destroyed. Repair: 1 mat + 1 man per HP. |
 | `has_settlement` | Major urban center. Counts toward win condition. Starts with a Factory. |
 | `has_road` | Road. Reduces terrain movement cost to 2/3 (see Movement section). Supply unit builds (1 manpower; truck not consumed). |
 | `has_railroad` | *(Stub)* Railroad. Very fast ground unit movement. Expensive to build. |
@@ -143,8 +143,6 @@ Resources are not produced by terrain type. They are produced by specific resour
 | `has_harbor` | Hosts and repairs naval units; enables naval production at any Factory within 5 hexes. Must be on/adjacent to a Water hex. Has HP. |
 | `has_bridge` | Foot/mechanized may cross this Water hex. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_canal` | Naval units may enter this Wetlands hex. Costs **10 manpower** to build. Supply unit present (not consumed). No effect on land movement. |
-| `is_damaged` | Building/infrastructure is damaged — reduced output. Still functional for movement (bridges still passable). |
-| `is_destroyed` | Building/infrastructure is destroyed — non-functional. Still visible on map. Repairable. |
 
 †The attribute hex itself is visible; hexes beyond it are not.
 
@@ -332,7 +330,7 @@ Buildings are placed on the map (either by GM at start or built by players durin
 | Airbase | 10 | 10 | 10 | No | Any hex; enables air production at any Factory within 5 hexes |
 | Harbor | 10 | 10 | 10 | No | Must be on/adjacent to Water; enables naval production at any Factory within 5 hexes |
 | Airstrip | 4 | 0 | 2 total | Consumed | Anywhere |
-| Bridge | 3 | 0 | 2 total | Consumed | On a Water hex |
+| Bridge | 4 | 0 | 2 total | Consumed | On a Water hex |
 | Fortification | 4 | 0 | 2 total | Consumed | Any land hex |
 | Road | — | 0 | 1 | Present, not consumed | Any passable land hex |
 
@@ -350,20 +348,31 @@ Mat-based buildings:  1 mat + 1 man per HP restored (same rate as construction)
 
 Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 
+Urban tile:           1 mat + 1 man per HP restored (max 4 HP). No facility required.
+
 Fortification:        1 manpower → restores to full HP (regardless of current HP). Completes in Phase 4. If
                       the Fortification is destroyed before Phase 4 completes, the manpower is lost and it
                       must be rebuilt from scratch. No materials required.
 ```
 
-**Building status (HP-based buildings: Factory, Airbase, Harbor, Fortification, Airstrip, Bridge):**
+**Building status (Factory, Airbase, Harbor, Fortification, Airstrip, Bridge):**
 - `under_construction`: never yet reached full HP. Not operational.
 - `operational`: at max HP.
-- `destroyed`: HP = 0. Non-functional. Tag stays on hex. Bridge impassable.
-- No separate "damaged" status — HP tracks the damage. Production capacity always scales as `floor(current_hp / 2)` regardless of how it got there. Airbases/Airstrips can still land and launch at any HP > 0; only production/repair slots are reduced.
+- `destroyed`: HP = 0. Non-functional. Tag stays on hex. Bridge at 0 HP = impassable.
+- No separate "damaged" status — HP directly scales production capacity (`floor(current_hp / 2)` slots). Airbases/Airstrips can still land and launch at any HP > 0.
 
-**No-HP infrastructure (urban tiles, roads, canals, vegetation):**
-- `is_damaged` — functioning but degraded. Damaged urban tile produces no manpower.
-- `is_destroyed` — non-functional. Still visible on map. Can be rebuilt.
+**Urban tiles (4 HP, tracked as `urban_hp` on the hex):**
+- 3–4 HP: operational, producing manpower.
+- 1–2 HP: damaged — produces no manpower. Still present on map.
+- 0 HP: destroyed. No manpower. Still visible.
+- Repair: 1 mat + 1 man per HP. No facility required (repaired by any unit in hex during ordering phase).
+
+**Vegetation (tag-based, no HP):**
+- Heavy → light → cleared by bombardment hits. Each step is a 50/50 roll (1d6: 4+). Cannot be repaired — vegetation grows back naturally over very long timescales (not modeled).
+
+**Roads and canals (immune to bombardment):**
+- `has_road` = true/false. Demolished by enemy supply truck action → set to false. No partial state.
+- `has_canal` = true/false. Same.
 
 **Fortification damage exception:** A Fortification gives its full +1 defense bonus as long as it has any HP remaining (damaged or operational). Being damaged does not reduce the bonus. Only complete destruction (HP = 0) removes it. This represents partial bunker/trench systems still providing cover even when damaged.
 
@@ -827,9 +836,10 @@ Bombardment is indirect fire — the target does not fire back. Resolves in Phas
 
 **Two rolls per targeted hex:**
 1. **vs Units** — one 2d6 roll per bombarder. Each roll ≤ bombarder's To-Hit → 1 hit. Each hit: select a unit to receive it **proportional to unit count** (a hex with 10 infantry and 2 armor has a 10/12 chance of hitting infantry). That unit makes a normal defense save. Failed save = 1 casualty or 1 HP damage as normal.
-2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≤ To-Hit → 1 infrastructure hit. Per hit: randomly select one infrastructure piece present (buildings, bridge, urban, vegetation, road, canal).
-   - **HP-based infrastructure** (Factory, Airbase, Harbor, Airstrip, Bridge, Fortification): loses 1 HP. No save roll.
-   - **No-HP infrastructure** (urban tile, road, canal, vegetation): roll 1d6. On a 4+ → set to `is_damaged` (or `is_destroyed` if already damaged). On a 1-3 → the hit glances off and causes no damage. This 50/50 chance prevents bombardment from always shredding soft infrastructure.
+2. **vs Infrastructure** — one 2d6 roll per bombarder (rolled simultaneously with the unit roll). Each roll ≤ To-Hit → 1 infrastructure hit. Roads and canals are **immune to bombardment** — exclude them from the selection pool. Per hit: randomly select one eligible infrastructure piece present (buildings, bridge, urban tile, vegetation).
+   - **HP-based infrastructure** (Factory, Airbase, Harbor, Airstrip, Bridge, Fortification, urban tile): loses 1 HP. No defense roll for structures.
+   - **Heavy vegetation** (`has_heavy_vegetation`): roll 1d6 — 4+ → hex becomes `has_light_vegetation` (thinned). On 1–3: no change.
+   - **Light vegetation** (`has_light_vegetation`): roll 1d6 — 4+ → vegetation cleared entirely (tag removed). On 1–3: no change.
 
 Multiple bombarders targeting the **same hex** pool their rolls as a single simultaneous attack — hits are totalled before any are applied.
 
