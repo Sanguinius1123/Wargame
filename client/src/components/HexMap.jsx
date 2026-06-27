@@ -305,9 +305,11 @@ function HexDetail({
             <div key={fname} style={{ marginBottom: 10 }}>
               <p style={{ ...STAT_LABEL, color: color ?? '#60a5fa' }}>{fname}</p>
               {units.map((u, i) => (
-                <p key={i} style={{ color: '#e2e8f0', fontSize: 13 }}>
-                  {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
-                </p>
+                isGM
+                  ? <GMUnitRow key={u.id ?? i} unit={u} gameId={gameId} onRefresh={onRefresh} />
+                  : <p key={u.id ?? i} style={{ color: '#e2e8f0', fontSize: 13 }}>
+                      {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
+                    </p>
               ))}
             </div>
           ))}
@@ -338,6 +340,45 @@ function HexDetail({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// GM unit row: shows unit with quantity controls (+/−/remove)
+function GMUnitRow({ unit, gameId, onRefresh }) {
+  const [busy, setBusy] = useState(false);
+
+  async function adjust(delta) {
+    setBusy(true);
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/gm/${gameId}/units/${unit.id}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity_delta: delta }),
+    });
+    setBusy(false);
+    onRefresh();
+  }
+
+  async function remove() {
+    setBusy(true);
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/gm/${gameId}/units/${unit.id}`, { method: 'DELETE', headers });
+    setBusy(false);
+    onRefresh();
+  }
+
+  const qtyDisplay = unit.hp != null ? `${unit.hp}HP` : `×${unit.quantity}`;
+  const btnS = { border: 'none', borderRadius: 3, padding: '2px 7px', fontSize: 12, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+      <span style={{ color: '#e2e8f0', fontSize: 13, flex: 1 }}>{unit.type} {qtyDisplay}</span>
+      {unit.hp == null && <>
+        <button style={{ ...btnS, background: '#1e3a5f', color: '#93c5fd' }} disabled={busy} onClick={() => adjust(1)} title="Add 1">+</button>
+        <button style={{ ...btnS, background: '#1e293b', color: '#94a3b8' }} disabled={busy} onClick={() => adjust(-1)} title="Remove 1">−</button>
+      </>}
+      <button style={{ ...btnS, background: '#7f1d1d', color: '#fca5a5' }} disabled={busy} onClick={remove} title="Remove all">✕</button>
     </div>
   );
 }
