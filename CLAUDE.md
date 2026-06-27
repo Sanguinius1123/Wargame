@@ -67,7 +67,7 @@ Full game design: `DESIGN.md`
 - **Proportional fire (inverse-distance weighted):** `weight = unit_count / distance`. Shots distributed proportionally to weight, largest-remainder rounding. Close combat (same hex): weight = unit_count (distance cancels). Ranged fire: closer stacks get more shots per unit (range 1 stack is 2× priority vs range 2 stack). Naval: each ship = unit_count 1. Applies to air intercept (all equidistant, so pure proportional-by-count).
 - **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
 - **Artillery:** Atk Range 2 (direct fire, ranged fire step). Bombard Range 8 (directed indirect fire, Bombard order). Stationary to bombard. Cannot bombard if enemies in own hex. 0 attack dice in close combat — auto-destroyed if alone vs enemies.
-- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, Bombard Range 8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, Bombard Range 8, Atk Range 3). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
+- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, Bombard Range 8; +1/+2 range from Hills/Mountains). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, Bombard Range 8, Atk Range 3; can target **any hex** — land or water — resolves Phase 3). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
 - **Ranged fire step:** Phase 2 (naval) and Phase 3 (ground) each have an automatic ranged fire step before close combat. All units fire at detected enemies within Atk Range — no order required. Simultaneous volleys. Units on Bombard orders skip this step. Artillery: 0 attack dice if enemies in own hex (close combat rules apply).
 - **Overwatch Skies (AA only):** AA Gun, Frigate, Battleship passively fire at detected aircraft in Phase 1. No order required. See Detection & Fog of War section.
 - **Artillery in direct combat:** 0 attack dice. Destroyed automatically if left alone vs enemies.
@@ -104,9 +104,9 @@ Full game design: `DESIGN.md`
 - **Phase 4 order:** Air return → Materials collected → Production queue advances → Settlement control evaluated → Manpower calculated → Win condition check → Reset.
 
 ### Patrol
-- **Ground patrol:** Foot radius 1, mechanized radius 2 (radius uses `mechanized` tag). LOS required. Patrol unit moves to the hex the enemy tried to enter and fights there. If patrol wins → enemy pushed back, patrol stays in intercepted hex. If enemy wins → enemy continues movement. If both survive → enemy retreats, patrol stays.
-- **Naval patrol:** Radius 2. Same intercept logic as ground patrol.
-- **Air patrol:** Formula-based radius. Each detected enemy flight group triggers separate intercept combat.
+- **Ground patrol:** Foot radius 1, mechanized radius 2 (radius uses `mechanized` tag). LOS required. One intercept per turn. Patrol unit moves to the hex the enemy tried to enter and fights there. If patrol wins → enemy pushed back, patrol stays in intercepted hex. If enemy wins → enemy continues movement. If both survive → enemy retreats, patrol stays.
+- **Naval patrol:** Radius 2. Same intercept logic as ground patrol. One intercept per turn.
+- **Air patrol:** Formula-based radius. Each detected enemy flight group triggers a separate sequential intercept. Multiple groups = multiple battles; casualties applied between each.
 
 ### Orders
 - **Fortify:** Any ground unit. One uninterrupted turn → +1 defense bonus. Cancelled if engaged before completion. Bonus persists until unit moves. Stacks with terrain and Fortification building bonus.

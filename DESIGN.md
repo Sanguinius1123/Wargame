@@ -47,18 +47,19 @@ Naval movement is step-by-step and simultaneous. All ships advance one hex at a 
 
 ### Phase 3 — Ground
 
-1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 4. Units within Atk Range of enemies but NOT in their hex are not forced to engage; they fire on them in the ranged fire step. Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules.
-2. **Ranged fire (ground).** All ground units fire once at detected enemies within their Atk Range. Simultaneous — both sides roll before damage is applied. Units with an active Bombard order targeting a specific distant hex skip this step. Artillery exception: 0 attack dice if enemies are present in its own hex (close combat rules apply instead).
-3. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
-4. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
+1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 5. Units within Atk Range of enemies but NOT in their hex are not forced to engage; they fire on them in the ranged fire step. Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules. **Patrol note:** a stealthy unit moving into a patrolling unit's LOS range during this step triggers an immediate detection check — if detected, the patrol unit may respond.
+2. **Detection rolls.** All ground units attempt to detect enemies within their LOS range. Standard detection formula applies (see Stealth and Detection). Units with effective_stealth > 0 (e.g., non-stealth units in vegetation or urban terrain) require a roll even without a stealth tag. Results determine who can be targeted in the ranged fire step.
+3. **Ranged fire (ground).** All ground units fire once at detected enemies within their Atk Range. Simultaneous — both sides roll before damage is applied. Units with an active Bombard order targeting a specific distant hex skip this step. Artillery exception: 0 attack dice if enemies are present in its own hex (close combat rules apply instead).
+4. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
+5. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
    - **Artillery bombardment:** stationary artillery not engaged in close combat fire at designated target hexes.
-   - **Naval bombardment:** Battleships with validated bombard orders fire at designated land hexes.
+   - **Naval bombardment:** Battleships with validated bombard orders fire at designated hexes (land or water).
    - **Air-to-ground strikes:** surviving bombers assigned to ground targets execute Bombing Run or Attack Run orders.
    - All bombardment and strikes are **indiscriminate** — all units in the targeted hex (friendly, enemy, allied) are eligible to be hit. If allied or friendly units are present in a bombarded hex, they may take casualties.
    - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
-5. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
-6. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, factory, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
+6. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
+7. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, factory, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
 
    **Air units at a captured Airbase:** Air units parked at an Airbase (no orders that turn) that is captured in Phase 3 face the same emergency as carrier-parked aircraft: roll 1d6 per unit — result ≥ 4 → emergency scramble to nearest friendly Airbase or Airstrip within movement range; fail → destroyed on the ground.
 
@@ -159,7 +160,7 @@ Resources are not produced by terrain type. They are produced by specific resour
 
 LOS is blocked by Mountains and vegetation attributes (see Hex Attributes). Unit facing is not modeled — LOS is a full circle around the unit.
 
-**Artillery elevation bonus:** `effective_range = base_range + max(0, firer_elevation − target_elevation)`. Terrain between firer and target does not block the shot arc.
+Elevation increases LOS for all units (see table above). Artillery additionally gains extended **Bombard Range** from high ground — see the Bombardment section.
 
 ### Hex Ownership
 
@@ -347,6 +348,10 @@ Air (at Airbase):     ceil(mat_cost / 4) mat + ceil(man_cost / 4) man → full H
 Mat-based buildings:  1 mat + 1 man per HP restored (same rate as construction)
 
 Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
+
+Fortification:        1 manpower → restores to full HP (regardless of current HP). Completes in Phase 4. If
+                      the Fortification is destroyed before Phase 4 completes, the manpower is lost and it
+                      must be rebuilt from scratch. No materials required.
 ```
 
 **Building status field:** `under_construction` → `operational` → `damaged` → `destroyed`
@@ -368,7 +373,7 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 **Production chain:**
 - Ground units: produced at any Factory. Spawned at the Factory hex or any adjacent hex (1 hex radius).
 - Air units: produced at a Factory with at least one Airbase within 5 hexes. Spawned at any Airbase, Airstrip, or Carrier within 5 hexes of that Factory.
-- Naval units: produced at a Factory with at least one Harbor within 5 hexes. Spawned at that Harbor (or any Harbor within 5 hexes of the Factory).
+- Naval units: produced at a Factory with at least one Harbor within 5 hexes. Spawned at any Harbor within 5 hexes of the Factory.
 
 **Supply units as builders:** One action per turn — the truck either moves OR builds, not both. Build actions:
 - **Road:** truck stays in place, builds up to 3 segments in adjacent hexes (per terrain limits). Truck not consumed. Segments complete immediately in Phase 4.
@@ -546,13 +551,11 @@ patrol_radius = floor((movement − 2 × distance_to_patrol_center) / 6)
 
 Patrol persists turn to turn until cancelled. A patrolling unit cannot also move that turn (it uses its movement to respond to contacts). Undetected units pass through without triggering intercept.
 
-**Patrol engages every contact** — each detected enemy entering the patrol area triggers a separate engagement. Casualties apply immediately before the next engagement. For air, this means sending a fighter sweep first to attrit the patrol, then following with bombers, is a valid tactic.
+**Ground patrol:** one intercept per turn. When a detected enemy enters the patrol area, the patrolling unit moves into the hex the enemy tried to enter and close combat triggers there. After combat: if the patrol unit wins (enemy wiped), it stays in that hex and the patrol order is complete for this turn. If the enemy wins (patrol unit wiped), the enemy continues movement. If both survive, the enemy is pushed back to its prior hex; the patrol unit holds the intercepted hex.
 
-**Ground patrol:** the patrolling unit moves to intercept when a detected enemy enters its patrol area (LOS required to react). The patrolling unit moves into the hex the enemy tried to enter and close combat triggers there. After combat: if the patrol unit wins (enemy wiped), the patrol unit stays in that hex; the patrol order is complete for this turn. If the enemy wins (patrol unit wiped), the enemy continues movement from that hex with remaining movement points. If both survive, the enemy is pushed back to the hex it came from; the patrol unit remains in the intercepted hex.
+**Naval patrol:** one intercept per turn. When a detected enemy ship enters the patrol area, the patrolling ship moves to intercept — it moves to the hex the enemy ship entered and triggers a hex collision there. After combat: if the patrol ship wins, it stays in that hex and the patrol order is complete for this turn. If the enemy wins, it continues movement from that hex. If both survive, the enemy is pushed back to its prior hex and the patrol ship holds the intercepted hex. LOS required to react; submarines require a detection roll before the patrol ship will respond.
 
-**Naval patrol:** when a detected enemy ship enters the patrol area, the patrolling ship moves to intercept — it moves to the hex the enemy ship entered and triggers a hex collision there. After combat: if the patrol ship wins, it stays in that hex; the patrol order is complete for this turn. If the enemy wins, it continues movement from that hex. If both survive, the enemy is pushed back to its prior hex and the patrol ship holds the intercepted hex. LOS required to react; submarines require a detection roll before the patrol ship will respond.
-
-**Air patrol:** fighters fly out to intercept detected enemy flight groups entering the patrol area. The patrol radius formula determines coverage (see above). Undetected stealth groups pass through without triggering intercept.
+**Air patrol:** fighters intercept each detected enemy flight group that enters the patrol area — one combat per group, resolved sequentially in the order they enter. Casualties from each battle are applied before the next group is engaged (a group depleted early in Phase 1 may be too weak to handle a later contact). Sending a fighter sweep first to attrit the patrol, then following with bombers, is a valid tactic. Undetected stealth groups pass through without triggering intercept.
 
 ---
 
@@ -813,7 +816,7 @@ Units that moved do NOT receive `defense_bonus`.
 
 ## Bombardment
 
-Bombardment is indirect fire — the target does not fire back. Resolves in Phase 3 alongside ground combat.
+Bombardment is indirect fire — the target does not fire back. Resolves in Phase 3 (for Artillery and Battleship bombard targeting any hex; for Bombing Run/Attack Run vs land hexes) or Phase 2 (for Bombing Run/Attack Run vs naval/water hexes). Battleship bombard can target any hex — land or water — and always resolves in Phase 3 regardless. Ships that moved away or were sunk in Phase 2 are no longer present when the Phase 3 bombard resolves; if the targeted water hex is empty, the bombardment is wasted.
 
 ### Rules Common to All Bombardment
 
@@ -833,12 +836,13 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - Must be stationary to bombard (cannot move and fire same turn)
 - Cannot bombard if enemy units are present in the artillery's own hex (engaged in close combat — check before executing bombard orders)
 - Target pattern: **1 hex** at range 1–8 (minimum range 1; cannot fire into own hex)
+- **Elevation bonus:** `effective_bombard_range = 8 + max(0, firer_elevation − target_elevation)`. Artillery on Hills fires up to 9 hexes; on Mountains, up to 10 hexes. Terrain between firer and target does not block the shot arc (high-arc indirect fire).
 - Rolls: 1 die vs units + 1 die vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
 - No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
 **Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
-- Directed bombardment: up to **8 hexes**. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2. Firing in the ranged fire step alone does not cancel the bombard order.
+- Directed bombardment: up to **8 hexes**. Can target **any hex** — land or water. Used to hit predicted enemy ship positions as well as shore targets. Resolves in Phase 3; ships that moved or sank in Phase 2 won't be there. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2. Firing in the ranged fire step alone does not cancel the bombard order.
 - Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
 - Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
