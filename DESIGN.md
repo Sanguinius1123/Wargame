@@ -88,7 +88,7 @@ This is where manpower from Phase 4 is spent. Players act in any order; the turn
 2. **Production panel:**
    - Place all `ready` units at valid spawn locations (ground → Factory hex or adjacent; air → Airbase/Airstrip/Carrier within 5 hexes of Factory; naval → Harbor within 5 hexes of Factory).
    - Queue new production: pay materials from stockpile + manpower from this turn's budget now.
-3. **Building construction:** allocate mat + manpower toward any buildings under construction. HP credited immediately. Materials deducted from stockpile, manpower deducted from budget.
+3. **Building construction and repair:** allocate mat + manpower toward buildings under construction or repairing damaged buildings (same rate: 1 mat + 1 man per HP). HP credited immediately. Materials deducted from stockpile, manpower deducted from budget.
 4. **Set orders:** movement, bombardment, flight groups, patrol, supply truck build actions (road, canal, airstrip, bridge — earmark manpower for these now).
 5. Any manpower not allocated before clicking Finish Turn is wasted.
 6. **Click Finish Turn.** When all players ready → next turn's phases execute.
@@ -136,7 +136,7 @@ Resources are not produced by terrain type. They are produced by specific resour
 | `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. Bombardment hit → 1d6: 4+ → becomes `has_light_vegetation`. |
 | `has_urban` | City environment. **4 HP.** Stealth +2. +1 move cost for mechanized. At 3–4 HP: produces manpower. At 1–2 HP: damaged — produces no manpower. At 0 HP: destroyed. Repair: 1 mat + 1 man per HP. |
 | `has_settlement` | Major urban center. Counts toward win condition. Starts with a Factory. |
-| `has_road` | Road. Reduces terrain movement cost to 2/3 (see Movement section). Supply unit builds (1 manpower; truck not consumed). |
+| `has_road` | Road. Reduces terrain movement cost to 2/3 (see Movement section). Supply unit builds segments in adjacent hexes (truck not consumed); manpower cost varies by terrain — see Road Construction table. |
 | `has_railroad` | *(Stub)* Railroad. Very fast ground unit movement. Expensive to build. |
 | `has_airstrip` | Hosts air units. Cannot produce them. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_airbase` | Hosts air units; enables air production at any Factory within 5 hexes. Has HP. |
@@ -332,7 +332,7 @@ Buildings are placed on the map (either by GM at start or built by players durin
 | Airstrip | 4 | 0 | 2 total | Consumed | Anywhere |
 | Bridge | 4 | 0 | 2 total | Consumed | On a Water hex |
 | Fortification | 4 | 0 | 2 total | Consumed | Any land hex |
-| Road | — | 0 | 1 | Present, not consumed | Any passable land hex |
+| Road | — | 0 | 1–3 per segment | Present, not consumed | Any passable land hex |
 
 HP = material cost for mat-based buildings. This makes all math trivial: **1 material + 1 manpower adds 1 HP of construction progress**.
 
@@ -540,7 +540,7 @@ Standing order for units that can engage in combat. Patrol is only available to 
 
 | Unit type | Patrol radius |
 |---|---|
-| Foot (Infantry, AA Gun) | 1 — adjacent hexes only |
+| Foot (Infantry, Artillery, AA Gun) | 1 — adjacent hexes only |
 | Mechanized (Armor) | 2 |
 | Naval (Destroyer, Frigate, Cruiser, Battleship, Carrier, Submarine) | 2 |
 | Air (Fighter) | See formula below |
@@ -713,7 +713,7 @@ otherwise → 1 casualty (ground) or 1 HP damage (naval)
 ```
 `defense_bonus` = sum of applicable terrain bonuses (see Terrain in Combat). Higher Defense = harder to kill. Penetration reduces effective defense.
 
-If `Defense − Penetration < 2` → effective defense < 2 → impossible to save (all hits deal casualties).
+If `(Defense + defense_bonus − Penetration) < 2` → impossible to save (the minimum 2d6 roll of 2 can never succeed; all hits deal casualties).
 
 Both sides roll simultaneously. Casualties and HP damage are removed after both volleys fully resolve.
 
