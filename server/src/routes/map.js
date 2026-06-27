@@ -21,7 +21,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all units grouped by hex
   const { data: units } = await adminDb
     .from('units')
-    .select('hex_q, hex_r, quantity, hp, faction_id, factions(name, color), unit_type_config(name, tags)')
+    .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags)')
     .eq('game_id', gameId);
 
   const unitsByHex = {};
@@ -29,10 +29,13 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     const k = `${u.hex_q},${u.hex_r}`;
     if (!unitsByHex[k]) unitsByHex[k] = [];
     unitsByHex[k].push({
+      id: u.id,
       type: u.unit_type_config?.name,
       tags: u.unit_type_config?.tags ?? [],
       quantity: u.quantity,
       hp: u.hp,
+      standing_order: u.standing_order,
+      fortification_level: u.fortification_level,
       factionId: u.faction_id,
       factionName: u.factions?.name,
       factionColor: u.factions?.color,

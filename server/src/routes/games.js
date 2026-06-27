@@ -56,7 +56,7 @@ router.post('/:gameId/factions', requireGM, async (req, res) => {
 router.get('/:gameId/factions', requireAuth, async (req, res) => {
   const { data, error } = await adminDb
     .from('factions')
-    .select('id, name, color, materials, manpower, profiles(username)')
+    .select('id, profile_id, name, color, materials, manpower, profiles(id, username)')
     .eq('game_id', req.params.gameId);
 
   if (error) return res.status(500).json({ error: error.message });

@@ -247,6 +247,12 @@ export async function calculateManpower(db, gameId) {
     const visited = new Set([`${sett.hex_q},${sett.hex_r}`]);
     const queue = [{ q: sett.hex_q, r: sett.hex_r }];
 
+    // Count the settlement hex itself if it is urban, owned, and producing.
+    const settUrban = hexIndex.get(`${sett.hex_q},${sett.hex_r}`);
+    if (settUrban && settUrban.owner_faction_id === factionId && settUrban.urban_hp >= 3) {
+      count++;
+    }
+
     while (queue.length) {
       const { q, r } = queue.shift();
       for (const [dq, dr] of AXIAL_NEIGHBORS) {
@@ -323,12 +329,15 @@ export async function resetTurnReady(db, gameId) {
 // runPhase4 — convenience wrapper for advance-turn
 // ---------------------------------------------------------------------------
 export async function runPhase4(db, gameId, currentTurn) {
-  const [materials, production, manpower, winResult] = await Promise.all([
+  // collectMaterials and advanceProduction are independent — run in parallel.
+  // calculateManpower must finish before checkWinCondition because it writes
+  // owner_faction_id on settlement hexes that checkWinCondition reads.
+  const [materials, production] = await Promise.all([
     collectMaterials(db, gameId),
     advanceProduction(db, gameId, currentTurn),
-    calculateManpower(db, gameId),
-    checkWinCondition(db, gameId),
   ]);
+  const manpower = await calculateManpower(db, gameId);
+  const winResult = await checkWinCondition(db, gameId);
 
   await resetTurnReady(db, gameId);
 

@@ -191,10 +191,12 @@ function resolveHexCombat(factionGroups, hex, unitTypeById) {
       let enemyCasualties = 0;
 
       for (let d = 0; d < dicesToRoll; d++) {
-        // Pick a firing unit's to_hit proportionally (weighted by quantity).
-        // Build a flat array of to_hit values weighted by each firer's quantity.
-        // This is done inline per die — the pool is small so it's fine.
-        const toHit = pickToHit(firingUnits, unitTypeById);
+        // Each die is attributed to one firing unit so to_hit and penetration
+        // are always from the same unit (no split-draw mismatches).
+        const firer = pickFiringUnit(firingUnits, unitTypeById);
+        const toHit = firer?.to_hit ?? 6;
+        const pen   = firer?.penetration ?? 0;
+
         const attackRoll = roll2d6();
         const hit = attackRoll <= toHit;
 
@@ -205,9 +207,7 @@ function resolveHexCombat(factionGroups, hex, unitTypeById) {
           continue;
         }
 
-        // Hit! Now roll save.
-        const attacker = pickAttacker(firingUnits, unitTypeById);
-        const pen = attacker ? attacker.penetration : 0;
+        // Hit! Roll save.
         const saveTarget = enemyCfg.defense + bonus - pen;
         const saveRoll = roll2d6();
         const saved = saveRoll <= saveTarget;
@@ -232,45 +232,20 @@ function resolveHexCombat(factionGroups, hex, unitTypeById) {
 }
 
 // ---------------------------------------------------------------------------
-// pickToHit
+// pickFiringUnit
 //
-// Select a to_hit value from the firing units weighted by quantity.
-// This represents drawing a random die from the aggregate pool.
+// Select one firing unit from the pool weighted by quantity.
+// A single die is attributed to one unit so its to_hit AND penetration
+// are used together — the two attributes must not come from different units.
 // ---------------------------------------------------------------------------
-function pickToHit(firingUnits, unitTypeById) {
+function pickFiringUnit(firingUnits, unitTypeById) {
   const total = firingUnits.reduce((s, u) => s + u.quantity, 0);
   let roll = Math.random() * total;
   for (const u of firingUnits) {
     roll -= u.quantity;
-    if (roll <= 0) {
-      const cfg = unitTypeById.get(u.unit_type_id);
-      return cfg ? cfg.to_hit : 6;
-    }
+    if (roll <= 0) return unitTypeById.get(u.unit_type_id) ?? null;
   }
-  // Fallback: last unit.
-  const last = firingUnits[firingUnits.length - 1];
-  const cfg = unitTypeById.get(last.unit_type_id);
-  return cfg ? cfg.to_hit : 6;
-}
-
-// ---------------------------------------------------------------------------
-// pickAttacker
-//
-// Select a firing unit weighted by quantity (for penetration lookup).
-// Reuses the same weighted-random approach as pickToHit.
-// ---------------------------------------------------------------------------
-function pickAttacker(firingUnits, unitTypeById) {
-  const total = firingUnits.reduce((s, u) => s + u.quantity, 0);
-  let roll = Math.random() * total;
-  for (const u of firingUnits) {
-    roll -= u.quantity;
-    if (roll <= 0) {
-      const cfg = unitTypeById.get(u.unit_type_id);
-      return cfg ? { ...cfg } : null;
-    }
-  }
-  const last = firingUnits[firingUnits.length - 1];
-  return unitTypeById.get(last.unit_type_id) ?? null;
+  return unitTypeById.get(firingUnits[firingUnits.length - 1].unit_type_id) ?? null;
 }
 
 // ---------------------------------------------------------------------------
