@@ -64,7 +64,7 @@ Full game design: `DESIGN.md`
 
 ### Combat
 - **Combat formula:** Roll-under. Attack: 2d6 ≤ To-Hit → 1 hit. Save: 2d6 ≤ (Defense + defense_bonus − Penetration) → saved; else 1 casualty or 1 HP. Both sides fire simultaneously, casualties removed after.
-- **Proportional fire:** Each attacking unit type spreads shots across defending types by count. Largest-remainder rounding. Applies in air intercept too — all units on both sides fire proportionally, dice earmarked per target type before roll.
+- **Proportional fire (inverse-distance weighted):** `weight = unit_count / distance`. Shots distributed proportionally to weight, largest-remainder rounding. Close combat (same hex): weight = unit_count (distance cancels). Ranged fire: closer stacks get more shots per unit (range 1 stack is 2× priority vs range 2 stack). Naval: each ship = unit_count 1. Applies to air intercept (all equidistant, so pure proportional-by-count).
 - **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
 - **Artillery:** Atk Range 2 (direct fire, ranged fire step). Bombard Range 8 (directed indirect fire, Bombard order). Stationary to bombard. Cannot bombard if enemies in own hex. 0 attack dice in close combat — auto-destroyed if alone vs enemies.
 - **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, Bombard Range 8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, Bombard Range 8, Atk Range 3). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.

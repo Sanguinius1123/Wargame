@@ -711,15 +711,27 @@ Both sides roll simultaneously. Casualties and HP damage are removed after both 
 
 ### Target Allocation (Proportional Fire)
 
-Each attacking unit type spreads its shots proportionally across all defending unit types by count. Applies universally — mixed stacks, multi-faction, all cases.
+Shot distribution uses **inverse-distance weighting**: each enemy stack's weight = `unit_count / distance`. Shots are distributed proportionally to weight, with largest-remainder rounding so totals are exact.
 
 ```
-shots_at_type_B = A_qty × (B_qty / total_enemy_qty)
+weight(stack)     = unit_count / distance
+shots_at_stack    = total_shots × (weight(stack) / sum_of_all_weights)
 ```
 
-Use largest-remainder rounding so totals add up exactly. Example: 10 infantry + 5 tanks attack 10 infantry + 5 tanks:
-- Attacking infantry (10 shots): 10×(10/15)=6.67→**7** at infantry, 10×(5/15)=3.33→**3** at tanks
-- Attacking tanks (5 shots): 5×(10/15)=3.33→**3** at infantry, 5×(5/15)=1.67→**2** at tanks
+**Close combat (same hex, distance = 0):** all enemies are equidistant. Use pure proportional-by-count: `weight = unit_count`. This is the same formula with distance = 1 for all (distance cancels out).
+
+**Ranged fire step (enemies at different distances):** closer stacks receive more shots per unit. At range 1 vs range 2, each unit in the nearer stack is worth 2× the shots of a unit in the farther stack. At equal range, reduces to pure proportional-by-count.
+
+**Naval HP units:** each ship counts as `unit_count = 1` regardless of current HP. Three destroyers and one battleship = weights 1/d, 1/d, 1/d, 1/d respectively.
+
+Example — 10 artillery (Atk Range 2) vs 4 infantry at range 1 and 6 armor at range 2:
+- weight(infantry) = 4/1 = 4.0
+- weight(armor)    = 6/2 = 3.0
+- total weight = 7.0
+- shots at infantry: 10 × 4/7 = 5.7 → **6**
+- shots at armor:    10 × 3/7 = 4.3 → **4**
+
+Even though armor is the larger stack, the infantry's closer range makes them the priority target.
 
 ### Unit Combat Stats
 
