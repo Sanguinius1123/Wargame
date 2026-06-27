@@ -77,7 +77,11 @@ export default function GMDashboard() {
     if (r.ok) { setMsg('Turn advanced.'); load(); } else setMsg('Error advancing turn.');
   }
 
-  const unitTypes = ['Infantry','Armor','Artillery','Supply','Destroyer','Battleship','Transport'];
+  const unitTypes = [
+    'Infantry','Armor','Artillery','AT Gun','AA Gun','Supply','Recon',
+    'Fighter','Scout Plane','Bomber','Transport Plane',
+    'Destroyer','Frigate','Cruiser','Battleship','Transport Ship','Carrier','Submarine',
+  ];
 
   return (
     <div style={s.page}>
@@ -104,7 +108,7 @@ export default function GMDashboard() {
                 <div style={s.dot(f.color)} />
                 <span style={{ color: '#e2e8f0', fontSize: 13 }}>{f.name}</span>
                 <span style={{ color: '#64748b', fontSize: 11 }}>({f.profiles?.username})</span>
-                <span style={{ color: '#fbbf24', fontSize: 11, marginLeft: 'auto' }}>P:{f.production} M:{f.manpower}</span>
+                <span style={{ color: '#fbbf24', fontSize: 11, marginLeft: 'auto' }}>Mat:{f.materials} Man:{f.manpower}</span>
               </div>
             ))}
             <form onSubmit={addFaction} style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 12 }}>

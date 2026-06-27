@@ -2,13 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 // Terrain color palette
 const TERRAIN_COLORS = {
-  plains:    '#4a7c59',
-  forest:    '#2d5a27',
-  mountains: '#6b6b6b',
-  coast:     '#5a8a6a',
-  sea:       '#1a3a5c',
-  urban:     '#7a6040',
-  river:     '#2a5a7a',
+  plains:   '#4a7c59',
+  hills:    '#7a8c5a',
+  mountains:'#6b6b6b',
+  desert:   '#c4a35a',
+  wetlands: '#3d6b5a',
+  water:    '#1a3a5c',
 };
 
 const VISIBILITY_OVERLAY = {
@@ -16,7 +15,6 @@ const VISIBILITY_OVERLAY = {
   dark:    'rgba(0,0,0,0.90)',
 };
 
-const DEVELOPMENT_MARKS = ['', '·', '··', '···'];
 
 function hexToPixel(q, r, size) {
   return {
@@ -171,14 +169,6 @@ export default function HexGrid({ hexes, onSelect, onDoubleClick, panZoom = fals
               <text x={cx} y={cy - SIZE * 0.35} textAnchor="middle" fontSize={10}
                 fill={isScouted ? '#6b7280' : '#e2e8f0'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
                 {h.terrain}
-              </text>
-            )}
-
-            {/* Development dots */}
-            {!isDark && h.development > 0 && (
-              <text x={cx} y={cy - SIZE * 0.35 + 11} textAnchor="middle" fontSize={9}
-                fill={isScouted ? '#4b5563' : '#fbbf24'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                {DEVELOPMENT_MARKS[h.development]}
               </text>
             )}
 
