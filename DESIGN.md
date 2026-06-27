@@ -605,8 +605,8 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Flight Group (Sweep)** | Fighter | Fly path to clear enemy patrol fighters. |
 | **Fortify** | ground | Dig in. Completes at end of Phase 3 if not engaged in **close combat** (enemy in same hex). Ranged fire does NOT cancel it. +1 defense bonus next turn onward. Bonus lost when unit leaves hex. |
 | **Repair** | naval (at Harbor), air (at Airbase) | Only available if unit is damaged AND at a repair facility. Uses 1 repair slot. Completes in 1 turn. |
-| **Skirmish Hold** *(stub)* | ground | Reduced damage; no advance even if enemy wiped. |
-| **Skirmish Retreat** *(stub)* | ground | Fire then fall back to designated hex. |
+| **Retreat** | ground (locked in combat) | Only available to units sharing a hex with an enemy. Unit moves to a designated adjacent non-enemy hex during the Phase 3 movement step. Skips close combat. Takes ranged fire from the enemy at range 1 during the ranged fire step. Cedes the hex to the enemy. Invalid if all adjacent hexes are enemy-occupied or impassable. |
+| **Pursue if Retreat** | ground (locked in combat) | Conditional order. If the enemy retreats from this hex, attempt pursuit: roll 2d6 ≤ (5 + average pursuer Move − average retreater Move). Success → pursuing units move into the hex the retreating unit fled to (hex collision, combat continues). Failure → pursuing units hold the now-uncontested hex. Auto-fails if the retreat destination is terrain impassable to the pursuer. If the enemy does not retreat, this order is ignored and the unit fights normally. Averages use weighted unit count. |
 
 ---
 
@@ -637,7 +637,26 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 
 ### Movement Into Enemy Hexes
 
-When a unit moves into a hex occupied by an enemy, both sides stop and fight. Exception: units with skirmish orders handle contact differently (stub).
+When a unit moves into a hex occupied by an enemy, both sides stop and fight.
+
+### Locked Combat and Retreat
+
+Units sharing a hex with an enemy at the start of the ordering phase are **locked in combat**. They may only be given a **Retreat** or **Pursue if Retreat** order — all other orders are unavailable until the hex is uncontested.
+
+**Retreat:** the unit moves to a designated adjacent non-enemy hex during the Phase 3 movement step. It skips close combat but takes ranged fire from the enemy at range 1 during the ranged fire step and may fire back. The original hex is ceded.
+
+**Pursue if Retreat:** conditional — activates only if the enemy actually retreats that turn. Roll 2d6 ≤ (5 + average pursuer Move − average retreater Move). On success the pursuing units follow into the retreat destination hex (hex collision — combat continues there). On failure they hold the now-empty hex. Auto-fails if the retreat destination is impassable to the pursuer. If the enemy holds, this order is ignored and the unit fights close combat normally.
+
+| Matchup | Score | Odds |
+|---|---|---|
+| Armor (4) pursuing Infantry (2) | 5 + 2 = 7 | 58% |
+| Mixed avg 3 pursuing Infantry (2) | 5 + 1 = 6 | 42% |
+| Equal speed | 5 + 0 = 5 | 28% |
+| Infantry (2) pursuing Armor (4) | 5 − 2 = 3 | 8% |
+
+**Mutual retreat:** if both sides issue Retreat orders simultaneously, both move out in the same step — the hex ends up empty, no combat resolves.
+
+**Surrounded:** a unit with no valid adjacent retreat hex cannot issue a Retreat order. It must fight.
 
 ### Naval Unit HP
 
