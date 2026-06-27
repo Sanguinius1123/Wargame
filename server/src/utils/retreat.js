@@ -247,7 +247,7 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
 
   // Track which original hexes had successful retreats and from which faction,
   // storing avg move of retreaters for pursuit roll.
-  // Map<originalHexKey, { retreaterFactionId, retreaterMoves: number[] }>
+  // Map<originalHexKey, { retreaterFactionId, retreaterMoves: number[], retreaterIds: string[] }>
   const retreatedFromHex = new Map();
 
   // Fire dice queued from all retreats, resolved simultaneously.
@@ -344,12 +344,13 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
     }
 
     // 5e. Move unit in our working data structures.
+    //   Save original coords BEFORE overwriting so we can undo on DB failure.
+    const origQ = unit.hex_q;
+    const origR = unit.hex_r;
+
     //   Remove from old hex.
     const oldHexList = hexUnits.get(originKey) ?? [];
-    hexUnits.set(
-      originKey,
-      oldHexList.filter((u) => u.id !== unit.id)
-    );
+    hexUnits.set(originKey, oldHexList.filter((u) => u.id !== unit.id));
 
     //   Update unit's position in unitById.
     unit.hex_q = dest.q;
@@ -369,13 +370,12 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
       errors.push(
         `Retreat: failed to move unit ${unit.id} to (${dest.q},${dest.r}) — ${moveError.message}`
       );
-      // Undo the in-memory move so pursuit logic is consistent.
-      hexUnits.get(dest.k).splice(
-        hexUnits.get(dest.k).indexOf(unit),
-        1
-      );
-      unit.hex_q = unit.hex_q; // no-op, already modified above — restore original
-      // (We'll just log and continue; pursuit will not see this unit as having retreated.)
+      // Undo in-memory move: remove from dest, restore to origin.
+      hexUnits.set(dest.k, (hexUnits.get(dest.k) ?? []).filter((u) => u.id !== unit.id));
+      unit.hex_q = origQ;
+      unit.hex_r = origR;
+      if (!hexUnits.has(originKey)) hexUnits.set(originKey, []);
+      hexUnits.get(originKey).push(unit);
       continue;
     }
 
@@ -384,12 +384,12 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
       retreatedFromHex.set(originKey, {
         retreaterFactionId: unit.faction_id,
         retreaterMoves: [],
+        retreaterIds: [],   // track specific unit IDs so pursuit can find their destination
       });
     }
     const retreatRecord = retreatedFromHex.get(originKey);
-    // Only one faction retreats per hex per "direction" — multiple units of
-    // the same faction may retreat; track all their move values.
     retreatRecord.retreaterMoves.push(unit.unitTypeCfg.move);
+    retreatRecord.retreaterIds.push(unit.id);
 
     // 5h. Build combat log entry for this retreat.
     combatLogInserts.push({
@@ -570,17 +570,14 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
     //    Since we moved them already, find units of the retreating faction in
     //    adjacent hexes that were updated this phase.
 
-    // Locate the retreater's destination hex: iterate retreat orders that fired
-    // from this hex.
+    // Locate the retreater's destination hex using the IDs we tracked during
+    // step 5g. These IDs are only units that retreated FROM currentKey, so
+    // there is no cross-hex contamination in multi-retreat turns.
     let retreaterDestKey = null;
-    for (const rOrder of retreatOrders) {
-      const rUnit = unitById.get(rOrder.unit_id);
+    for (const rId of retreatRecord.retreaterIds) {
+      const rUnit = unitById.get(rId);
       if (!rUnit) continue;
-      if (rUnit.faction_id !== retreatRecord.retreaterFactionId) continue;
-      // After retreat, the unit's hex was updated in unitById.
-      // The retreater's original hex was currentKey, so its current hex ≠ currentKey.
       const rCurrentKey = hexKey(rUnit.hex_q, rUnit.hex_r);
-      // Find one that is now NOT at currentKey but is adjacent.
       if (rCurrentKey !== currentKey) {
         retreaterDestKey = rCurrentKey;
         break;
