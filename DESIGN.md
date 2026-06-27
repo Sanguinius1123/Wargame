@@ -32,15 +32,17 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 
 ### Phase 2 — Naval
 
-Naval movement is simultaneous and non-blocking. Ships complete their full planned routes without stopping for enemies — fleets can pass alongside each other, sail through contested waters, and arrive at their destinations. Combat resolves at the end of all movement.
+Naval movement is step-by-step and simultaneous. All ships advance one hex at a time along their planned paths, synchronized. Contact is triggered only when ships occupy the same hex or cross each other's paths at the same step — mere adjacency does not interrupt movement.
 
-1. **All naval units execute full movement simultaneously.** Each ship follows its planned path to its destination. Enemy ships do not interrupt movement mid-path.
-2. **Hex collision check.** After all ships have moved: any hex containing ships from two or more factions at war → **hex collision**. Ships in a collision cannot move further this turn.
+1. **Ships step through movement simultaneously.** All ships advance one hex per step. Repeat until all ships have used their movement or stopped. Ships not involved in a contact continue stepping.
+2. **Contact check per step.** After each hex is moved, check for two contact types:
+   - **Hex collision**: two enemy ships occupy the same hex → both stop. Close combat resolves at the end of Phase 2 (step 5).
+   - **Path crossing**: two enemy ships swapped hexes in this step (A→B while B→A simultaneously) → border battle. Neither ship is in a hex; both fire simultaneously. If both survive: each returns to their starting hex and movement ends. If one is wiped: the winner continues from the border.
 3. **Detection rolls.** Surface ships attempt to detect submarines within sonar range; submarines attempt to detect surface ships. Undetected submarines cannot be targeted.
 4. **Ranged fire (naval).** All ships fire once at every detected enemy ship within their Atk Range. Simultaneous volleys — all rolls resolved before HP damage is applied. Ships on directed Bombard orders targeting land hexes skip this step. Bombers on Attack Run orders against naval hexes also attack in this step.
-5. **Naval combat.** Ships in hex collisions fight simultaneously.
+5. **Close combat.** Ships in hex collisions fight simultaneously.
 6. **Sunk ships removed.** Carrier sinking → emergency rules for parked air units (see Carrier section). Transport sinking → survival rolls for embarked ground units (see Naval Landing).
-7. **Battleship bombard validation.** A Battleship involved in a hex collision this phase cannot bombard in Phase 3. A Battleship that only participated in the ranged fire step (step 4) but had no hex collision may still bombard.
+7. **Battleship bombard validation.** A Battleship involved in a hex collision or path crossing this phase cannot bombard in Phase 3.
 
 ---
 
@@ -798,7 +800,7 @@ Each die is earmarked for a target unit type (via proportional fire calculation)
 
 ### Movement and Combat Interaction
 
-**Crossing detection (ground only):** When two ground units move through each other simultaneously (A → B's origin, B → A's origin), a border battle occurs. Neither unit is in a hex during this exchange — combat happens at the border between the two hexes. Both sides fire simultaneously. If both survive: each returns to their starting hex and movement ends. If one side is wiped: the winner continues their planned movement from the border forward.
+**Crossing detection (ground and naval):** When two units move through each other simultaneously (A → B's origin, B → A's origin), a border battle occurs. Neither unit is in a hex — combat happens at the border between the two hexes. Both sides fire simultaneously. If both survive: each returns to their starting hex and movement ends. If one side is wiped: the winner continues their planned movement from the border forward.
 
 **Movement into enemy hex:** When a unit steps into a hex containing enemies, both sides stop and fight. If the attacker wipes out all defenders, it occupies that hex and may continue its remaining movement. If defenders survive (or both sides take losses), the attacker's movement ends in that hex.
 
