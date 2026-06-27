@@ -48,7 +48,7 @@ Full game design: `DESIGN.md`
 ### Units
 - **Unit stacks:** One `units` row per (faction, unit_type, hex). Quantity tracked in that row. Ground units auto-merge in same hex. Split by giving different movement orders.
 - **Naval units use HP not quantity stacks.** Repaired at Harbors.
-- **Bombers use HP (3 per aircraft).** `quantity = ceil(current_hp / 3)`. Repaired at Airbase. Bomber attack vs ground/naval: To-Hit 7, Pen 1. Tail gun in intercept: Def To-Hit 5, Pen 0, 1 die per aircraft count.
+- **Bombers use HP (3 per aircraft).** `quantity = ceil(current_hp / 3)`. Repaired at Airbase. Air-to-air stats: To-Hit 5, Pen 0, fires ceil(current_hp/3) dice in intercept. Bombing mission stats (Bombing Run / Attack Run only, flight group special ability): To-Hit 7, Pen 1 vs ground/naval.
 - **Fighters use quantity stacks** (same as ground units). Each failed save = 1 fighter lost.
 - **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.

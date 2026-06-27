@@ -491,6 +491,8 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 | Scout | Fighters only | Fly path to gather LOS |
 | Sweep | Fighters only | Clear patrol fighters from a path |
 
+**Bombing missions use special stats** — when a flight group executes a Bombing Run or Attack Run, bombers use **bombing stats (To-Hit 7, Pen 1 vs ground/naval)** rather than their standard air-to-air stats. Intercepting fighters in Phase 1 fight bombers using the bombers' air-to-air stats (To-Hit 5, Pen 0). The bombing stats only apply when the bombers are actually dropping ordnance in Phase 2 or Phase 3.
+
 **Bombing Run** is for infrastructure destruction: 3-hex line, designated infra targets, both unit and infra rolls (see Bombardment section).
 
 **Attack Run** is for targeting mobile forces or naval units:
@@ -753,18 +755,16 @@ Ground:
 
 Air:
 
-| Unit | To-Hit | Def To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| Fighter | 7 | — | 7 | 0 | — | 30 | 5 | 1 | 4 | 2 | 2 |
-| Scout Plane | — | — | 6 | 0 | — | 35 | 6 | — | 3 | 1 | 2 |
-| Bomber | 7 | 5 | 6 | 1† | 3 | 40 | 5 | 1 | 5 | 2 | 3 |
-| Transport Plane | — | — | 3 | 0 | — | 25 | 3 | — | 3 | 1 | 2 |
+| Unit | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Fighter | 7 | 7 | 0 | — | 30 | 5 | 1 | 4 | 2 | 2 |
+| Scout Plane | — | 6 | 0 | — | 35 | 6 | — | 3 | 1 | 2 |
+| Bomber | 5 | 6 | 0 | 3 | 40 | 5 | 1 | 5 | 2 | 3 |
+| Transport Plane | — | 3 | 0 | — | 25 | 3 | — | 3 | 1 | 2 |
 
-`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (5 = ~28% hit rate). †Bomber Pen 1 applies to attacks vs ground/naval targets only. Tail gun (Def To-Hit) uses Pen 0.
+These are standard air-to-air stats used in intercept combat. Bombers are poor dogfighters (To-Hit 5 = 28%). **Bombing Run and Attack Run are flight group special abilities** with their own stats — see Flight Groups and Bombardment sections.
 
-**Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
-
-In intercept, each aircraft fires 1 tail gun die. Tail gun dice = `ceil(current_hp / 3)`. A group at 10/15 HP fires 4 tail gun dice (Def To-Hit 5, Pen 0).
+**Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. In intercept, each aircraft fires 1 die at To-Hit 5, Pen 0; dice count = `ceil(current_hp / 3)`. Repaired at Airbase.
 
 **Artillery in direct combat** — artillery has 0 attack dice when enemies enter its hex. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
 
@@ -788,10 +788,10 @@ All stats are placeholder values — balance tuning deferred until after test ga
 
 Intercept is one combined simultaneous battle. All units on both sides roll at the same time — there is no sequential escort-first-then-bombers sequence. Proportional fire applies: each unit type on one side distributes shots across all unit types on the opposing side by count.
 
-| Unit in intercept | To-Hit | Notes |
-|---|---|---|
-| Fighter | 7 | Fires at all opposing units proportionally |
-| Bomber (tail gun) | 5 | Fires at all opposing units proportionally |
+| Unit in intercept | To-Hit | Pen | Notes |
+|---|---|---|---|
+| Fighter | 7 | 0 | |
+| Bomber | 5 | 0 | HP-based; fires ceil(current_hp/3) dice |
 
 Each die is earmarked for a target unit type (via proportional fire calculation) before the attack roll is made, then the defense roll is made against that unit type's defense stat.
 
