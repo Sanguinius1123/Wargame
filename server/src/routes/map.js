@@ -21,7 +21,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all units grouped by hex
   const { data: units } = await adminDb
     .from('units')
-    .select('hex_q, hex_r, quantity, faction_id, factions(name, color), unit_type_config(name, category)')
+    .select('hex_q, hex_r, quantity, hp, faction_id, factions(name, color), unit_type_config(name, tags)')
     .eq('game_id', gameId);
 
   const unitsByHex = {};
@@ -30,8 +30,9 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     if (!unitsByHex[k]) unitsByHex[k] = [];
     unitsByHex[k].push({
       type: u.unit_type_config?.name,
-      category: u.unit_type_config?.category,
+      tags: u.unit_type_config?.tags ?? [],
       quantity: u.quantity,
+      hp: u.hp,
       factionId: u.faction_id,
       factionName: u.factions?.name,
       factionColor: u.factions?.color,
@@ -89,7 +90,7 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
 
   const { data: units } = await adminDb
     .from('units')
-    .select('id, quantity, faction_id, factions(name, color), unit_type_config(name, category, attack, defense, movement, los_range)')
+    .select('id, quantity, hp, standing_order, fortification_level, faction_id, factions(name, color), unit_type_config(name, tags, to_hit, defense, penetration, atk_range, move, los, bombard_range, bombard_to_hit, overwatch_to_hit, overwatch_range)')
     .eq('game_id', gameId)
     .eq('hex_q', q)
     .eq('hex_r', r);
@@ -131,9 +132,11 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
   res.json(data);
 });
 
-// POST /api/map/:gameId/orders — player queues a movement order
+// POST /api/map/:gameId/orders — player queues orders for a unit
+// Body: { unit_id, order_type, to_hex_q?, to_hex_r?, target_hex_q?, target_hex_r?, path? }
+// path is an array of {q, r} steps for multi-hex movement; clears previous orders for this unit.
 router.post('/:gameId/orders', requireAuth, async (req, res) => {
-  const { unit_id, to_hex_q, to_hex_r } = req.body;
+  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path } = req.body;
 
   // Verify player owns the unit
   const { data: unit } = await adminDb
@@ -147,13 +150,17 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   }
 
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  const turn = game.current_turn;
 
-  const { data, error } = await adminDb
-    .from('movement_orders')
-    .upsert({ unit_id, game_id: req.params.gameId, to_hex_q, to_hex_r, turn: game.current_turn }, { onConflict: 'unit_id' })
-    .select()
-    .single();
+  // Clear existing orders for this unit this turn
+  await adminDb.from('movement_orders').delete().eq('unit_id', unit_id).eq('turn', turn);
 
+  // Build order rows — path[] for multi-step moves, single row otherwise
+  const steps = Array.isArray(path) && path.length > 0
+    ? path.map((step, i) => ({ unit_id, game_id: req.params.gameId, order_type: 'move', sequence: i, to_hex_q: step.q, to_hex_r: step.r, turn }))
+    : [{ unit_id, game_id: req.params.gameId, order_type, sequence: 0, to_hex_q, to_hex_r, target_hex_q, target_hex_r, turn }];
+
+  const { data, error } = await adminDb.from('movement_orders').insert(steps).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
