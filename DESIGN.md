@@ -49,7 +49,7 @@ Naval movement is step-by-step and simultaneous. All ships advance one hex at a 
 
 1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. Forced engagement occurs only when a unit enters the **same hex** as an enemy — both sides stop and close combat queues for step 5. Units within Atk Range of enemies but NOT in their hex are not forced to engage; they fire on them in the ranged fire step. Naval Transport ships offload ground units at the end of Phase 2; offloaded units are placed in the landing hex and have used all movement for the turn (cannot move further in Phase 3). See Movement and Combat Interaction for crossing (swap hex) rules. **Patrol note:** a stealthy unit moving into a patrolling unit's LOS range during this step triggers an immediate detection check — if detected, the patrol unit may respond.
 2. **Detection rolls.** All ground units attempt to detect enemies within their LOS range. Standard detection formula applies (see Stealth and Detection). Units with effective_stealth > 0 (e.g., non-stealth units in vegetation or urban terrain) require a roll even without a stealth tag. Results determine who can be targeted in the ranged fire step.
-3. **Ranged fire (ground).** All ground units fire once at detected enemies within their Atk Range. Simultaneous — both sides roll before damage is applied. Units with an active Bombard order targeting a specific distant hex skip this step. Artillery exception: 0 attack dice if enemies are present in its own hex (close combat rules apply instead).
+3. **Ranged fire (ground).** All ground units fire once at detected enemies within their Atk Range. Simultaneous — both sides roll before damage is applied. Units with an active Bombard order targeting a specific distant hex skip this step. Artillery has no Atk Range and skips this step entirely.
 4. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
 5. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
@@ -558,7 +558,7 @@ Patrolling units intercept enemies that move through their patrol area. The unit
 
 | Unit type | Patrol radius |
 |---|---|
-| Foot (Infantry, AA Gun) | 1 — adjacent hexes only |
+| Foot (Infantry, AA Gun, AT Gun, Recon) | 1 — adjacent hexes only |
 | Mechanized (Armor) | 2 |
 | Naval (Destroyer, Frigate, Cruiser, Battleship, Carrier, Submarine) | 2 |
 | Air (Fighter) | See formula below |
@@ -653,6 +653,8 @@ Units sharing a hex with an enemy at the start of the ordering phase are **locke
 | Mixed avg 3 pursuing Infantry (2) | 5 + 1 = 6 | 42% |
 | Equal speed | 5 + 0 = 5 | 28% |
 | Infantry (2) pursuing Armor (4) | 5 − 2 = 3 | 8% |
+
+**Critical pursuit rolls:** Natural 2 (both dice show 1) = pursuit always succeeds regardless of speed disadvantage. Natural 12 (both dice show 6) = pursuit always fails regardless of speed advantage.
 
 **Mutual retreat:** if both sides issue Retreat orders simultaneously, both move out in the same step — the hex ends up empty, no combat resolves.
 
