@@ -48,14 +48,14 @@ Full game design: `DESIGN.md`
 ### Units
 - **Unit stacks:** One `units` row per (faction, unit_type, hex). Quantity tracked in that row. Ground units auto-merge in same hex. Split by giving different movement orders.
 - **Naval units use HP not quantity stacks.** Repaired at Harbors.
-- **Bombers use HP (3 per aircraft).** `quantity = ceil(current_hp / 3)`. Repaired at Airbase.
+- **Bombers use HP (3 per aircraft).** `quantity = ceil(current_hp / 3)`. Repaired at Airbase. Bomber attack vs ground/naval: To-Hit 7, Pen 1. Tail gun in intercept: Def To-Hit 5, Pen 0, 1 die per aircraft count.
 - **Fighters use quantity stacks** (same as ground units). Each failed save = 1 fighter lost.
 - **unit_type_config is per game:** Each game defines its own unit roster. Not global.
 - **No stack limits:** Map design handles concentration strategy, not hard limits.
 - **Unit roster:** Infantry, Armor, Artillery, AA Gun, Supply (ground); Fighter, Scout Plane, Bomber, Transport Plane (air); Destroyer, Frigate, Cruiser, Battleship, Transport (ship), Carrier, Submarine (naval).
 
 ### Movement
-- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`.
+- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Ground movement is **step-by-step**: units advance one hex at a time, stop on contact with enemies. Winner may continue remaining movement.
 - **Mountains impassable for mechanized** without a road. Foot can always enter any ground terrain.
 - **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale).
 - **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
@@ -67,7 +67,8 @@ Full game design: `DESIGN.md`
 - **Proportional fire:** Each attacking unit type spreads shots across defending types by count. Largest-remainder rounding. Applies in air intercept too — all units on both sides fire proportionally, dice earmarked per target type before roll.
 - **Defense bonuses (stack):** Elevation +1 (ground vs ground, attacker lower, defender stationary); light veg +1 / heavy veg +2 (all attacks incl bombardment, stationary); Fortify order +1 (personal, lost on move); Fortification building +1 (all friendly in hex, full bonus until HP=0).
 - **Artillery:** Range 1–8. Stationary. Cannot bombard if engaged in close combat (enemies in own hex). 0 attack dice in direct combat — destroyed automatically if alone against enemies.
-- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate — hits all units including friendly. Artillery (1 hex, To-Hit 8, Pen 2, 1 die). Battleship (3-hex triangle, To-Hit 8, Pen 2, 3 dice/hex). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
+- **Bombardment:** Two rolls per hex (vs units, vs infra). Indiscriminate. Artillery (1 hex, To-Hit 7, Pen 2, 1 die, range 1–8). Battleship (3-hex triangle, To-Hit 7, Pen 2, 3 dice/hex, directed range 8). Bombers (3-hex line or Attack Run, To-Hit 7, Pen 1, 1 die/hex). Blind fire = no report.
+- **Overwatch Fire:** Standing order for Artillery and Battleship. Player designates a directional cone (flat-top hex: one of 6 directions; range 4 max; 2/3/4/5 hexes at ranges 1–4). Fires automatically vs first detected enemy entering cone per turn. Artillery: 1 die, To-Hit 7, Pen 2. Battleship: 3 dice, To-Hit 7, Pen 2 — fires in Phase 2 vs surface ships (not subs, ship not stopped) AND Phase 3 vs ground units. Cancelled if engaged in close/naval combat before trigger.
 - **Artillery in direct combat:** 0 attack dice. Destroyed automatically if left alone vs enemies.
 
 ### Detection & Fog of War
@@ -82,7 +83,7 @@ Full game design: `DESIGN.md`
 - **Intercept combat:** One combined simultaneous battle — all fighters and bombers on both sides roll at once. No sequential escort-first-then-bombers.
 - **Bomber routing:** After Phase 1, surviving bombers assigned to Phase 2 (naval target) or Phase 3 (ground target).
 - **Patrol radius (air):** `floor((movement − 2 × distance_to_patrol_center) / 6)`. Fighter at home airbase = radius 5.
-- **Naval AA:** Frigate overwatch (To-Hit 10, Pen 1, Range 3). Battleship overwatch (To-Hit 7, Pen 0, Range 1 — point defense only).
+- **Naval AA (Overwatch Skies):** Frigate (To-Hit 7, Pen 1, Range 3). Battleship (To-Hit 6, Pen 0, Range 1 — point defense only). Land AA Gun (To-Hit 7, Pen 0, Range 2). AA hits in flight groups distributed proportionally by unit type count.
 
 ### Buildings
 - **HP = material cost:** 1 mat + 1 man = +1 HP construction progress. Not operational until max HP.
@@ -106,6 +107,7 @@ Full game design: `DESIGN.md`
 ### Orders
 - **Fortify:** Any ground unit. One uninterrupted turn → +1 defense bonus. Cancelled if engaged before completion. Bonus persists until unit moves. Stacks with terrain and Fortification building bonus.
 - **Repair:** Naval at Harbor, air at Airbase. Only when damaged. Uses 1 repair slot.
+- **Overwatch Fire:** Artillery or Battleship. Standing order, explicit setup. Player sets cone direction. See Bombardment section.
 
 ## Schema
 

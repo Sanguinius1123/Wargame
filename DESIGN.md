@@ -34,7 +34,7 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 
 Naval movement is path-based, not jump-to-destination. Ships process their movement one step at a time, and contact with enemies interrupts movement mid-path.
 
-1. **Naval units begin movement.** Ships step through their movement paths one hex at a time.
+1. **Naval units begin movement.** Ships step through their movement paths one hex at a time. After each hex moved, Battleships on **Overwatch Fire** check whether a detected enemy surface ship (not submarine) entered their overwatch cone — if yes, fire 3 dice at that ship immediately (To-Hit 7, Pen 2). The enemy ship is **not stopped** — it takes HP damage and continues. Each Battleship fires overwatch at most once per Phase 2.
 2. **Contact check per step.** After each hex moved, check: is this ship now in the same hex as, or adjacent to, any enemy ship? If yes → stop, fight, then continue with remaining movement points.
 3. **Detection rolls (per engagement).** Before each naval combat, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
 4. **Naval combat resolves.** All ships present (both sides, all factions at war) roll simultaneously. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. All HP damage applied after volleys.
@@ -46,7 +46,7 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
 
 ### Phase 3 — Ground
 
-1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead.
+1. **All ground units execute movement orders simultaneously.** Supply trucks on build orders do not move — they execute their build action in place instead. Ground movement is **step-by-step**: units advance one hex at a time. When a unit enters a hex containing enemy units, both sides stop and ground combat triggers immediately in that hex. If the attacker wins (all defenders wiped), it may continue its remaining movement. If both sides survive, the attacker's movement ends. See Movement and Combat Interaction for crossing (swap hex) rules.
 2. **Contested ground hexes identified.** Any hex containing ground units from factions at war → combat triggers.
 3. **All combat and bombardment resolves simultaneously.** Every action in Phase 3 fires at the same moment:
    - **Direct ground combat:** units in contested hexes fight.
@@ -277,8 +277,8 @@ The supply truck does not enter the hex it is building into. It can build up to 
 | Plains | 1 | 0.67 | 2 → 3 hexes | 4 → 6 hexes |
 | Hills | 2 | 1.33 | 1 → **2 hexes** | 2 → 3 hexes |
 | Mountains | 4 | 2.67 | 1 → **1 hex** | 1 → **2 hexes** |
-| Desert (foot/mech) | 2 / 1 | 1.33 / 0.67 | 1 → 1 hex | 4 → 6 hexes |
-| Wetlands | 2 / 4 | 1.33 / 2.67 | 1 → 1 hex | 1 → 1 hex |
+| Desert (foot/mech) | 2 / 1 | 1.33 / 0.67 | 1 → **2 hexes** | 4 → 6 hexes |
+| Wetlands | 2 / 4 | 1.33 / 2.67 | 1 → **2 hexes** | 1 → **2 hexes** |
 
 Roads connect visually: adjacent road tiles draw a road line between them, including across bridges. Naval and air are unaffected.
 
@@ -554,6 +554,7 @@ Patrol persists turn to turn until cancelled. A patrolling unit cannot also move
 | **Defend** | ground, naval | Standing order. Terrain defense_bonus. Never needs orders. |
 | **Wait** | ground, naval | Skip this turn. Defense_bonus applies. Resets next turn. |
 | **Bombard** | Artillery, Battleship | Attack target hex at range. Artillery must be stationary. |
+| **Overwatch Fire** | Artillery, Battleship | Standing order. Designate cone direction (one of 6 flat-top hex directions). Fires automatically vs first detected enemy entering cone each turn. Cancels if unit engaged in close combat (Artillery) or naval combat (Battleship). |
 | **Patrol** | Fighter | Standing order. Intercept enemy air in patrol area. |
 | **Flight Group (Bombing Run)** | Fighter, Bomber | Compose group, designate 3-hex line path, target infrastructure. |
 | **Flight Group (Attack Run)** | Fighter, Bomber | Compose group, designate target hex, attack first detected unit. |
@@ -614,9 +615,11 @@ AA Guns have base stats used for ground combat and separate overwatch stats for 
 | Mode | Trigger | To-Hit | Pen | Range |
 |---|---|---|---|---|
 | Ground combat (Phase 3) | Enemy ground in hex | 5 | 1 | 1 |
-| Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 10 | 0 | 2 |
+| Overwatch Skies (Phase 1) | Detected enemy air within range 2 | 7 | 0 | 2 |
 
 Overwatch is a **passive standing behavior** — no order required. Any detected enemy flight group passing within range triggers AA fire automatically. **AA fires once per flight group** — each group that enters the overwatch zone is engaged separately. This prevents players from using a sacrificial plane group to exhaust AA defenses before sending the main strike.
+
+**Hit distribution within flight groups:** When AA scores hits on a flight group, hits are assigned proportionally by unit type count. A group of 5 bombers and 10 fighters receiving 3 hits: 1 bomber hit (5/15) + 2 fighter hits (10/15). Largest-remainder rounding.
 
 ### Naval AA — Overwatch Skies
 
@@ -624,10 +627,10 @@ Frigates and Battleships can fire at detected aircraft entering their overwatch 
 
 | Unit | Mode | To-Hit | Pen | Range | Notes |
 |---|---|---|---|---|---|
-| Frigate | Overwatch Skies (Phase 1) | 10 | 1 | 3 | Primary role — strong AA, wide coverage |
-| Battleship | Overwatch Skies (Phase 1) | 7 | 0 | 1 | Weak point defense only — adjacent hexes |
+| Frigate | Overwatch Skies (Phase 1) | 7 | 1 | 3 | Primary AA role — wide coverage |
+| Battleship | Overwatch Skies (Phase 1) | 6 | 0 | 1 | Point defense only — adjacent hexes |
 
-The Frigate is the dedicated naval AA platform: higher pen than the land AA Gun, and wider range (3 vs 2). The Battleship's AA is incidental — its short range and low To-Hit make it a last-ditch defense, not a screening tool.
+The Frigate is the dedicated naval AA platform — wide range (3 vs 2) and good To-Hit despite zero pen. The Battleship's Overwatch Skies is incidental point defense only.
 
 Frigate detection stat = 5 (specialized radar). Stealth flight groups require a detection roll before the Frigate can fire at them.
 
@@ -721,9 +724,9 @@ Ground:
 
 | Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|
-| Infantry | 7 | 6 | 0 | 2 | 3 | 1 | 1 | 0 | 1 |
-| Armor | 8 | 9 | 3 | 4 | 3 | 1 | 3 | 1 | 2 |
-| Artillery | 8 | 4 | 2 | 2 | 3 | 4 | 4 | 2 | 2 |
+| Infantry | 6 | 6 | 0 | 2 | 3 | 1 | 1 | 0 | 1 |
+| Armor | 7 | 8 | 2 | 4 | 3 | 1 | 3 | 1 | 2 |
+| Artillery | 7 | 4 | 2 | 2 | 3 | 8 | 4 | 2 | 2 |
 | AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
 
@@ -733,12 +736,14 @@ Air:
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Fighter | 7 | — | 7 | 0 | — | 30 | 5 | 1 | 4 | 2 | 2 |
 | Scout Plane | — | — | 6 | 0 | — | 35 | 6 | — | 3 | 1 | 2 |
-| Bomber | 8 | 4 | 6 | 0 | 3 | 40 | 5 | 1 | 5 | 2 | 3 |
+| Bomber | 7 | 5 | 6 | 1† | 3 | 40 | 5 | 1 | 5 | 2 | 3 |
 | Transport Plane | — | — | 3 | 0 | — | 25 | 3 | — | 3 | 1 | 2 |
 
-`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (4 = ~17% hit rate, rarely kills).
+`Def To-Hit` = to-hit of bomber's tail-gun defensive fire against intercepting fighters (5 = ~28% hit rate). †Bomber Pen 1 applies to attacks vs ground/naval targets only. Tail gun (Def To-Hit) uses Pen 0.
 
 **Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. Repaired at Airbase.
+
+In intercept, each aircraft fires 1 tail gun die. Tail gun dice = `ceil(current_hp / 3)`. A group at 10/15 HP fires 4 tail gun dice (Def To-Hit 5, Pen 0).
 
 **Artillery in direct combat** — artillery has 0 attack dice when enemies enter its hex. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
 
@@ -746,13 +751,13 @@ Naval (HP-based; attack dice per ship):
 
 | Unit | Atk dice | To-Hit | Defense | Pen | HP | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Destroyer | 1 | 7 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 | 2 |
-| Frigate | 1 | 6 | 7 | 1 | 7 | 4 | 5 | 1 | 4 | 2 | 2 |
+| Destroyer | 1 | 6 | 6 | 1 | 6 | 5 | 4 | 1 | 3 | 1 | 2 |
+| Frigate | 1 | 6 | 7 | 0 | 7 | 4 | 5 | 1 | 4 | 2 | 2 |
 | Cruiser | 2 | 7 | 7 | 1 | 8 | 3 | 4 | 2 | 4 | 2 | 2 |
-| Battleship | 3 | 8 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 3 | 3 |
+| Battleship | 3 | 7 | 9 | 2 | 12 | 4 | 4 | 3 | 6 | 3 | 3 |
 | Transport (ship) | 0 | — | 4 | 0 | 5 | 4 | 4 | — | 2 | 1 | 1 |
 | Carrier | 1 | 6 | 6 | 0 | 10 | 3 | 5 | 1 | 5 | 2 | 3 |
-| Submarine | 2 | 8 | 7 | 4 | 6 | 4 | 0 | 1 | 4 | 2 | 2 |
+| Submarine | 2 | 6 | 7 | 2 | 6 | 4 | 0 | 1 | 4 | 2 | 2 |
 
 **Frigate** — anti-air specialist. Mediocre surface combatant (To-Hit 6 = 42% vs ships); purpose is AA overwatch at sea. High LOS and detection for spotting incoming aircraft.
 
@@ -771,7 +776,9 @@ Each die is earmarked for a target unit type (via proportional fire calculation)
 
 ### Movement and Combat Interaction
 
-**Crossing detection:** A → B's origin, B → A's origin simultaneously → border battle. Combat resolves in each unit's starting hex. Survivors: if one side is wiped, the winning side advances into the hex they were originally heading toward. If both sides survive, each stays in their starting hex.
+**Crossing detection:** A → B's origin, B → A's origin simultaneously → border battle. Combat resolves in each unit's starting hex. Survivors: if one side is wiped, the winning side advances into the now-empty hex and may continue its remaining movement. If both sides survive, each stays in their starting hex and movement ends.
+
+**Movement into enemy hex:** When a unit steps into a hex containing enemies, both sides stop and fight. If the attacker wipes out all defenders, it occupies that hex and may continue its remaining movement. If defenders survive (or both sides take losses), the attacker's movement ends in that hex.
 
 **Multi-faction combat:** When three or more factions occupy or contest the same hex, each faction attacks all factions it is `at_war` with. Allied factions pool into a shared defender/attacker group against common enemies. Neutral factions do not fire but still receive fire from factions at war with them.
 
@@ -802,16 +809,42 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 **Artillery**
 - Must be stationary to bombard (cannot move and fire same turn)
 - Cannot bombard if enemy units are present in the artillery's own hex (engaged in close combat — check before executing bombard orders)
-- Target pattern: **1 hex** at range 1–8
-- Rolls: 1 die vs units + 1 die vs infra (To-Hit 8, Pen 2)
+- Target pattern: **1 hex** at range 1–8 (minimum range 1; cannot fire into own hex)
+- Rolls: 1 die vs units + 1 die vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
 - No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
 
+**Artillery Overwatch Fire** (standing order — player must set this up explicitly)
+
+Player designates a cone: one of the 6 flat-top hex directions (E, NE, NW, W, SW, SE). The cone widens by 1 hex per range step:
+
+| Range | Hexes in cone |
+|---|---|
+| 1 | 2 |
+| 2 | 3 |
+| 3 | 4 |
+| 4 | 5 (max) |
+
+When a detected enemy ground unit enters any hex in the cone during Phase 3: artillery fires **1 die** vs units (To-Hit 7, Pen 2, no infra roll) at that hex. Fires **once per turn** — only the first detected enemy triggering the cone receives fire that turn. Subsequent units entering the cone that turn are ignored. Cancelled if the artillery is engaged in close combat in its own hex before the trigger fires.
+
 **Battleship**
-- May move and bombard in the same turn; cancelled if engaged in naval combat that turn
-- Target pattern: **3 mutually adjacent hexes (triangle)**; player picks which triangle
-- Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 8, Pen 2)
+- Directed bombardment range: up to **8 hexes**. May move and bombard in the same turn; cancelled if engaged in naval combat that turn.
+- Target pattern: **3 mutually adjacent hexes (triangle)** all within range; player picks which triangle.
+- Rolls: 3 dice per hex vs units + 3 vs infra (To-Hit 7, Pen 2)
 - Infrastructure selection: random among present pieces
+
+**Battleship Overwatch Fire** (standing order — player must set this up explicitly)
+
+Same cone geometry as Artillery Overwatch (player picks direction, range up to 4, 2/3/4/5 hexes per ring). Fires **3 dice** at the first detected enemy triggering the cone.
+
+Two separate triggers per turn — both can fire in the same turn if the Battleship is not engaged in full naval combat:
+
+- **Phase 2 (Naval):** fires if a detected enemy **surface ship** (not submarine) enters the cone's water hexes. The enemy ship is **not stopped** — it takes HP damage and continues moving. Fires at most once in Phase 2.
+- **Phase 3 (Ground):** fires if detected enemy **ground units** enter the cone's land hexes. Vs units only, no infra roll. Fires at most once in Phase 3.
+
+**Cancellation:** if the Battleship is drawn into a full naval combat exchange during Phase 2 (both sides trading fire), its Phase 3 ground overwatch is cancelled. Phase 2 overwatch fire alone (enemy ship takes hits and moves on without reciprocal combat) does not cancel Phase 3.
+
+To-Hit 7, Pen 2 for all Battleship Overwatch Fire triggers.
 
 **Bombers**
 - Bombing resolves as part of air-to-ground strikes (survivors from Phase 1)
@@ -909,7 +942,7 @@ Manpower not spent during the ordering phase is wasted.
 ## Carrier
 
 - Tags: naval + air
-- Air unit capacity: **4 fighters maximum**. Cannot carry bombers.
+- Air unit capacity: **4 slots**. Can carry Fighters and Scout Planes (1 slot each). Cannot carry Bombers.
 - Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
 - Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
 - Air units produced at a Manufacturing Facility with adjacent Airbase may spawn aboard a Carrier within adjacent range of that Airbase.
