@@ -16,8 +16,6 @@
 // the cost would exceed budget; this lets a unit always enter an adjacent hex.
 // =============================================================
 
-import { adminDb } from '../db.js';
-
 // ---------------------------------------------------------------------------
 // Hex adjacency (axial coordinates)
 // Two hexes are adjacent when the Chebyshev distance in cube coords equals 1.
