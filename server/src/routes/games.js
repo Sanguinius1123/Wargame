@@ -73,4 +73,54 @@ router.get('/:gameId/participants', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// POST /api/games/:gameId/finish-turn — player marks ready for next turn
+// When all players (role='player') are ready, automatically advances the turn.
+router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+
+  // Mark this player ready
+  const { error: markErr } = await adminDb
+    .from('game_participants')
+    .update({ turn_ready: true })
+    .eq('game_id', gameId)
+    .eq('profile_id', req.user.id);
+
+  if (markErr) return res.status(500).json({ error: markErr.message });
+
+  // Check if all players are ready
+  const { data: players } = await adminDb
+    .from('game_participants')
+    .select('turn_ready')
+    .eq('game_id', gameId)
+    .eq('role', 'player');
+
+  const allReady = players?.length > 0 && players.every(p => p.turn_ready);
+
+  if (allReady) {
+    // Advance turn: clear orders, increment turn, reset turn_ready
+    const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+    const nextTurn = (game?.current_turn ?? 1) + 1;
+
+    await adminDb.from('movement_orders').delete().eq('game_id', gameId).eq('turn', game.current_turn);
+    await adminDb.from('games').update({ current_turn: nextTurn }).eq('id', gameId);
+    await adminDb.from('game_participants').update({ turn_ready: false }).eq('game_id', gameId).eq('role', 'player');
+
+    return res.json({ advanced: true, current_turn: nextTurn });
+  }
+
+  res.json({ advanced: false, waiting_on: players?.filter(p => !p.turn_ready).length ?? 0 });
+});
+
+// GET /api/games/:gameId/turn-status — GM view: which players are ready
+router.get('/:gameId/turn-status', requireGM, async (req, res) => {
+  const { data, error } = await adminDb
+    .from('game_participants')
+    .select('turn_ready, profiles(username)')
+    .eq('game_id', req.params.gameId)
+    .eq('role', 'player');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(p => ({ username: p.profiles?.username, ready: p.turn_ready })));
+});
+
 export default router;
