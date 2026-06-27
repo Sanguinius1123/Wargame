@@ -33,7 +33,7 @@ Full game design: `DESIGN.md`
 - **No coast or river terrain types:** Coastal = adjacency to Water. Rivers = Water hexes going inland.
 - **Hex ownership only for objectives:** owner_faction_id only tracked for hexes with settlements, urban tiles, resource tiles, or buildings. Plain terrain (hills, plains, etc.) has no owner.
 - **Vegetation is two hex attributes:** `has_light_vegetation` and `has_heavy_vegetation`. Both block LOS into-but-not-through. Stealth bonus +1/+3.
-- **Urban is a hex attribute:** `has_urban`. Settlements (`has_settlement`) are major cities that count toward win condition and start with a Manufacturing Facility.
+- **Urban is a hex attribute:** `has_urban`. Settlements (`has_settlement`) are major cities that count toward win condition and start with a Factory.
 
 ### Resources
 - **Two resources:** Materials (saveable, from GM-placed resource tiles, 1 per tile per turn) and Manpower (not saveable, flood-fill from urban tiles per settlement).
@@ -55,7 +55,7 @@ Full game design: `DESIGN.md`
 - **Unit roster:** Infantry, Armor, Artillery, AA Gun, Supply (ground); Fighter, Scout Plane, Bomber, Transport Plane (air); Destroyer, Frigate, Cruiser, Battleship, Transport (ship), Carrier, Submarine (naval).
 
 ### Movement
-- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Ground movement is **step-by-step**: units advance one hex at a time. **Forced contact (ground) = entering same hex.** Adjacent units can fire voluntarily (range-1 fire) without forced engagement. **Naval contact = within Atk Range** (Destroyer/Frigate/Carrier/Sub stop when adjacent; Cruiser stops at 2; Battleship stops at 3). Winner of forced contact may continue remaining movement.
+- **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Ground movement is **step-by-step**: units advance one hex at a time. **Forced contact (ground) = entering same hex.** Adjacent units can fire voluntarily without forced engagement. **Naval movement is non-blocking:** ships complete their full planned routes regardless of enemies. Naval combat resolves at end of movement via ranged fire step (Atk Range) and hex collision (same hex = close combat). Winner of ground forced contact may continue remaining movement.
 - **`mechanized` tag** (Armor, Supply) determines mechanized terrain costs. `mobile` alone does not mean mechanized (cavalry, eagle riders = mobile but foot costs). Mountains impassable for mechanized without road; `has_heavy_vegetation` impassable for mechanized. Foot units can always enter any ground terrain.
 - **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale).
 - **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
@@ -88,8 +88,11 @@ Full game design: `DESIGN.md`
 
 ### Buildings
 - **HP = material cost:** 1 mat + 1 man = +1 HP construction progress. Not operational until max HP.
-- **Buildings:** Manufacturing Facility (20 HP), Airbase (10 HP), Harbor (10 HP), Airstrip (4 HP, supply consumed), Bridge (3 HP, supply consumed), Fortification (4 HP, supply consumed, +1 defense to all ground units in hex until destroyed — damaged state still gives full bonus).
-- **Production capacity:** Slots = floor(current_hp / 2). Unit slot cost = ceil(mat_cost / 2). Full Mfg Facility (20 HP) = 10 slots.
+- **Buildings:** Factory (20 HP), Airbase (10 HP), Harbor (10 HP), Airstrip (4 HP, supply consumed), Bridge (3 HP, supply consumed), Fortification (4 HP, supply consumed, +1 defense to all ground units in hex until destroyed — damaged state still gives full bonus).
+- **Production capacity:** Slots = floor(current_hp / 2). Unit slot cost = ceil(mat_cost / 2). Full Factory (20 HP) = 10 slots. Factory needs Airbase within 5 hexes to produce air; Harbor within 5 hexes to produce naval.
+- **Spawn rules:** Ground → Factory hex or adjacent (1 hex). Air → any Airbase/Airstrip/Carrier within 5 hexes of Factory. Naval → any Harbor within 5 hexes of Factory.
+- **Airbase/Harbor placement:** Airbase anywhere; Harbor must be on/adjacent to Water. Both enable production at any Factory within 5 hexes (no adjacency requirement to Factory).
+- **Parked air at captured Airbase:** If Airbase hex is captured in Phase 3, parked air units (no orders) make emergency scramble roll (1d6, ≥4 → fly to nearest friendly landing site within movement range; fail → destroyed).
 - **Repair capacity:** Harbor and Airbase each have floor(current_hp / 2) repair slots. Repair cost = ceil(mat_cost/4) mat + ceil(man_cost/4) man. Requires explicit Repair order; only available when damaged at facility.
 - **Fortification:** Full +1 defense bonus at any HP > 0. Only destroyed (HP=0) removes bonus. Applies to all friendly ground units in hex, all attack types including bombardment.
 

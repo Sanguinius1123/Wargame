@@ -32,16 +32,15 @@ All phases resolve automatically when all players click Finish Turn (or GM force
 
 ### Phase 2 — Naval
 
-Naval movement is path-based, not jump-to-destination. Ships process their movement one step at a time, and contact with enemies interrupts movement mid-path.
+Naval movement is simultaneous and non-blocking. Ships complete their full planned routes without stopping for enemies — fleets can pass alongside each other, sail through contested waters, and arrive at their destinations. Combat resolves at the end of all movement.
 
-1. **Naval units begin movement.** Ships step through their movement paths one hex at a time.
-2. **Contact check per step.** After each hex moved, check: is this ship now adjacent to any enemy ship? If yes → stop.
-3. **Detection rolls (per engagement).** Before each naval combat exchange, surface ships roll to detect submarines; submarines roll to detect surface ships. Undetected submarines cannot be targeted in that engagement.
-4. **Ranged fire (naval).** All ships fire once at detected enemy ships within their Atk Range. Simultaneous — all volleys rolled before HP damage applied. Ships not yet at adjacent range but within Atk Range are included (e.g. Cruiser fires at enemies within 2 hexes, Battleship within 3 hexes). Ships on directed Bombard orders against land hexes skip this step.
-5. **Naval combat resolves.** All adjacent ships present (both sides, all factions at war) roll simultaneously for close combat. Bombers executing Attack Runs against ships also attack in this combat — air-to-naval strikes resolve here alongside surface combat. HP damage from ranged fire (step 4) and close combat (step 5) all applied after all volleys in both steps complete.
-6. **Sunk ships removed.** Carrier sinking triggers emergency rules for parked air units (emergency takeoff roll). Transport sinking triggers survival rolls for ground units aboard (if adjacent to land).
-7. **Movement continues.** Surviving ships resume remaining movement points. Steps 2–6 repeat if further contacts occur.
-8. **Battleship bombard orders validated.** Battleships that engaged in naval combat this phase cannot bombard in Phase 3.
+1. **All naval units execute full movement simultaneously.** Each ship follows its planned path to its destination. Enemy ships do not interrupt movement mid-path.
+2. **Hex collision check.** After all ships have moved: any hex containing ships from two or more factions at war → **hex collision**. Ships in a collision cannot move further this turn.
+3. **Detection rolls.** Surface ships attempt to detect submarines within sonar range; submarines attempt to detect surface ships. Undetected submarines cannot be targeted.
+4. **Ranged fire (naval).** All ships fire once at every detected enemy ship within their Atk Range. Simultaneous volleys — all rolls resolved before HP damage is applied. Ships on directed Bombard orders targeting land hexes skip this step. Bombers on Attack Run orders against naval hexes also attack in this step.
+5. **Naval combat.** Ships in hex collisions fight simultaneously.
+6. **Sunk ships removed.** Carrier sinking → emergency rules for parked air units (see Carrier section). Transport sinking → survival rolls for embarked ground units (see Naval Landing).
+7. **Battleship bombard validation.** A Battleship involved in a hex collision this phase cannot bombard in Phase 3. A Battleship that only participated in the ranged fire step (step 4) but had no hex collision may still bombard.
 
 ---
 
@@ -58,7 +57,9 @@ Naval movement is path-based, not jump-to-destination. Ships process their movem
    - All bombardment and strikes are **indiscriminate** — all units in the targeted hex (friendly, enemy, allied) are eligible to be hit. If allied or friendly units are present in a bombarded hex, they may take casualties.
    - All hits from all sources pooled; casualties and HP damage applied after all volleys complete.
 5. **Building and infrastructure damage assessed.** Infra hits applied: HP buildings lose HP, no-HP infra flagged damaged or destroyed.
-6. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, manufacturing facility, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
+6. **Objective hex capture.** Ownership is only tracked for hexes with objectives: settlements, urban tiles, resource tiles, and buildings (airbase, harbor, factory, etc.). Any such hex where exactly one faction's ground units remain → that faction captures it. Plain terrain hexes (empty hills, plains, desert, etc.) have no owner — units occupy them tactically but ownership is not recorded. Buildings and infrastructure transfer to new owner in current state.
+
+   **Air units at a captured Airbase:** Air units parked at an Airbase (no orders that turn) that is captured in Phase 3 face the same emergency as carrier-parked aircraft: roll 1d6 per unit — result ≥ 4 → emergency scramble to nearest friendly Airbase or Airstrip within movement range; fail → destroyed on the ground.
 
 ---
 
@@ -83,7 +84,7 @@ This is where manpower from Phase 4 is spent. Players act in any order; the turn
 
 1. **Review** combat reports and battle log, filtered through fog of war.
 2. **Production panel:**
-   - Place all `ready` units at spawn locations (ground → Manufacturing Facility, air → Airbase, naval → Harbor).
+   - Place all `ready` units at valid spawn locations (ground → Factory hex or adjacent; air → Airbase/Airstrip/Carrier within 5 hexes of Factory; naval → Harbor within 5 hexes of Factory).
    - Queue new production: pay materials from stockpile + manpower from this turn's budget now.
 3. **Building construction:** allocate mat + manpower toward any buildings under construction. HP credited immediately. Materials deducted from stockpile, manpower deducted from budget.
 4. **Set orders:** movement, bombardment, flight groups, patrol, supply truck build actions (road, canal, airstrip, bridge — earmark manpower for these now).
@@ -132,11 +133,11 @@ Resources are not produced by terrain type. They are produced by specific resour
 | `has_light_vegetation` | Blocks LOS†. No move penalty for foot; +2 for mechanized. Stealth +1 for all units. |
 | `has_heavy_vegetation` | Blocks LOS†. +2 for foot; impassable for mechanized. Stealth +3 for all units. |
 | `has_urban` | City environment. Stealth +2. +1 move cost for mechanized. Contributes to manpower for connected settlement. |
-| `has_settlement` | Major urban center. Counts toward win condition. Starts with a Manufacturing Facility. |
+| `has_settlement` | Major urban center. Counts toward win condition. Starts with a Factory. |
 | `has_road` | Road. Reduces terrain movement cost to 2/3 (see Movement section). Supply unit builds (1 manpower; truck not consumed). |
 | `has_railroad` | *(Stub)* Railroad. Very fast ground unit movement. Expensive to build. |
 | `has_airstrip` | Hosts air units. Cannot produce them. Has HP. Built by consuming a Supply unit + 2 manpower. |
-| `has_airbase` | Hosts and produces air units. Must be adjacent to a Manufacturing Facility. Has HP. |
+| `has_airbase` | Hosts and produces air units. Has HP. |
 | `has_harbor` | Naval production and repair. Must be on/adjacent to a Water hex. Has HP. |
 | `has_bridge` | Foot/mechanized may cross this Water hex. Has HP. Built by consuming a Supply unit + 2 manpower. |
 | `has_canal` | Naval units may enter this Wetlands hex. Costs **10 manpower** to build. Supply unit present (not consumed). No effect on land movement. |
@@ -324,9 +325,9 @@ Buildings are placed on the map (either by GM at start or built by players durin
 
 | Building | Max HP | Mat cost | Man cost | Supply unit? | Placement rules |
 |---|---|---|---|---|---|
-| Manufacturing Facility | 20 | 20 | 20 | No | Pre-placed at settlements; player-buildable elsewhere |
-| Airbase | 10 | 10 | 10 | No | Must be adjacent to a Manufacturing Facility |
-| Harbor | 10 | 10 | 10 | No | Must be on/adjacent to Water AND adjacent to a Manufacturing Facility |
+| Factory | 20 | 20 | 20 | No | Pre-placed at settlements; player-buildable elsewhere |
+| Airbase | 10 | 10 | 10 | No | Any hex; enables air production at any Factory within 5 hexes |
+| Harbor | 10 | 10 | 10 | No | Must be on/adjacent to Water; enables naval production at any Factory within 5 hexes |
 | Airstrip | 4 | 0 | 2 total | Consumed | Anywhere |
 | Bridge | 3 | 0 | 2 total | Consumed | On a Water hex |
 | Fortification | 4 | 0 | 2 total | Consumed | Any land hex |
@@ -334,7 +335,7 @@ Buildings are placed on the map (either by GM at start or built by players durin
 
 HP = material cost for mat-based buildings. This makes all math trivial: **1 material + 1 manpower adds 1 HP of construction progress**.
 
-**Construction:** Players allocate materials and manpower toward a building each turn. Each 1 mat + 1 man invested adds 1 HP. The building is not operational until it reaches max HP. Players can invest as little or as much as their budget allows per turn — a Manufacturing Facility can be half-built (10 HP) over one turn and completed the next. Enemies can attack under-construction buildings to damage or destroy them. If HP drops to 0: building is lost, no refund.
+**Construction:** Players allocate materials and manpower toward a building each turn. Each 1 mat + 1 man invested adds 1 HP. The building is not operational until it reaches max HP. Players can invest as little or as much as their budget allows per turn — a Factory (20 HP) can be half-built over one turn and completed the next. Enemies can attack under-construction buildings to damage or destroy them. If HP drops to 0: building is lost, no refund.
 
 **Repair costs:**
 ```
@@ -364,9 +365,9 @@ Airstrip/Bridge:      1 Supply unit consumed + 1 man per HP restored
 **Hex capture and buildings:** When a hex changes ownership, all buildings and infrastructure on it transfer to the new owner in whatever state they are in (including under-construction buildings). The new owner can continue construction, use, or repair them.
 
 **Production chain:**
-- Ground units: produced at Manufacturing Facility
-- Air units: produced at Manufacturing Facility with adjacent Airbase. Spawned at the Airbase (or a Carrier within adjacent range).
-- Naval units: produced at Manufacturing Facility with adjacent Harbor. Spawned at the Harbor.
+- Ground units: produced at any Factory. Spawned at the Factory hex or any adjacent hex (1 hex radius).
+- Air units: produced at a Factory with at least one Airbase within 5 hexes. Spawned at any Airbase, Airstrip, or Carrier within 5 hexes of that Factory.
+- Naval units: produced at a Factory with at least one Harbor within 5 hexes. Spawned at that Harbor (or any Harbor within 5 hexes of the Factory).
 
 **Supply units as builders:** One action per turn — the truck either moves OR builds, not both. Build actions:
 - **Road:** truck stays in place, builds up to 3 segments in adjacent hexes (per terrain limits). Truck not consumed. Segments complete immediately in Phase 4.
@@ -517,16 +518,16 @@ The fundamental unit of air action. Players compose flight groups; individual ai
 
 ## Patrol
 
-Standing order for units. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
+Standing order for units that can engage in combat. Patrol is only available to units with a To-Hit stat — units that cannot attack (Supply, Scout Plane, Transport Plane, Transport ship) cannot be assigned patrol orders. Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
 
 **Patrol radius by unit type:**
 
 | Unit type | Patrol radius |
 |---|---|
-| Foot (Infantry, Artillery, AA Gun, Supply) | 1 — adjacent hexes only |
+| Foot (Infantry, AA Gun) | 1 — adjacent hexes only |
 | Mechanized (Armor) | 2 |
-| Naval | 2 |
-| Air (Fighter, Scout Plane) | See formula below |
+| Naval (Destroyer, Frigate, Cruiser, Battleship, Carrier, Submarine) | 2 |
+| Air (Fighter) | See formula below |
 
 **Air patrol radius formula:**
 ```
@@ -797,7 +798,7 @@ Each die is earmarked for a target unit type (via proportional fire calculation)
 
 ### Movement and Combat Interaction
 
-**Crossing detection:** A → B's origin, B → A's origin simultaneously → border battle. Combat resolves in each unit's starting hex. Survivors: if one side is wiped, the winning side advances into the now-empty hex and may continue its remaining movement. If both sides survive, each stays in their starting hex and movement ends.
+**Crossing detection (ground only):** When two ground units move through each other simultaneously (A → B's origin, B → A's origin), a border battle occurs. Neither unit is in a hex during this exchange — combat happens at the border between the two hexes. Both sides fire simultaneously. If both survive: each returns to their starting hex and movement ends. If one side is wiped: the winner continues their planned movement from the border forward.
 
 **Movement into enemy hex:** When a unit steps into a hex containing enemies, both sides stop and fight. If the attacker wipes out all defenders, it occupies that hex and may continue its remaining movement. If defenders survive (or both sides take losses), the attacker's movement ends in that hex.
 
@@ -891,7 +892,7 @@ Manpower per turn = sum over all **controlled** settlements of their assigned ur
 - Large city (10 assigned urban tiles, controlled) → 10 manpower/turn
 - Contested city (any size) → 0 manpower/turn
 
-Controlling the urban sprawl around a settlement — not just the settlement hex itself — is what generates manpower. Expensive constructions (Manufacturing Facility = 20 manpower) require large cities or multiple cities active in the same turn.
+Controlling the urban sprawl around a settlement — not just the settlement hex itself — is what generates manpower. Expensive constructions (Factory = 20 manpower) require large cities or multiple cities active in the same turn.
 
 Manpower not spent during the ordering phase is wasted.
 
@@ -900,15 +901,15 @@ Manpower not spent during the ordering phase is wasted.
 ## Production
 
 **Production panel** — shown at the **start of each turn**, before orders are set:
-1. **Place completed units** — units whose production was queued last turn are ready. Player chooses spawn location at the relevant facility (Manufacturing Facility for ground, Airbase for air, Harbor for naval).
+1. **Place completed units** — units whose production was queued last turn are ready. Player chooses a valid spawn location (see Spawn Rules below).
 2. **Queue new production** — player selects unit types to produce this turn. Materials are deducted immediately from stockpile. Manpower is deducted from the budget carried forward from the previous turn's Phase 4.
 
 **Production time:** always 1 turn. Pay resources at start of turn N → unit available to place at start of turn N+1.
 
 **Spawn rules:**
-- Ground units: spawn at Manufacturing Facility
-- Air units: spawn at adjacent Airbase (or a Carrier within adjacent range)
-- Naval units: spawn at adjacent Harbor
+- Ground units: spawn at the Factory hex or any adjacent hex (within 1 hex of Factory).
+- Air units: spawn at any Airbase, Airstrip, or Carrier within 5 hexes of the producing Factory.
+- Naval units: spawn at any Harbor within 5 hexes of the producing Factory.
 
 **Resource payment:** Materials deducted from stockpile immediately. Manpower deducted from this turn's manpower budget (collected last Phase 4). You can only queue what your current budget allows — no shortfall risk since you spend known resources.
 
@@ -917,7 +918,7 @@ Manpower not spent during the ordering phase is wasted.
 **If a facility is captured in Phase 3:** all units in its production queue that have not yet been placed are lost. Defenders are assumed to destroy them before ceding the facility. No refund.
 
 **Production capacity:**
-- All units produced at Manufacturing Facility. Slots per turn = `floor(current_hp / 2)`. Full facility (20 HP) = 10 slots. Damaged to 10 HP = 5 slots. Destroyed = 0.
+- All units produced at Factory. Production slots per turn = `floor(current_hp / 2)`. Full Factory (20 HP) = 10 slots. Damaged to 10 HP = 5 slots. Destroyed = 0.
 - Each unit costs `ceil(mat_cost / 2)` production slots (see Slots column in unit stats).
 - Manpower cost = `floor(mat_cost / 2)` per unit produced.
 
@@ -942,7 +943,7 @@ Manpower not spent during the ordering phase is wasted.
 - Air unit capacity: **4 slots**. Can carry Fighters and Scout Planes (1 slot each). Cannot carry Bombers.
 - Each unit type has a `carrier_slots` value (Fighter = 1, Bomber = N/A). Carrier capacity is stored per unit type in unit_type_config.
 - Fighters launched from Carrier use it as their home airstrip/airbase for landing purposes.
-- Air units produced at a Manufacturing Facility with adjacent Airbase may spawn on any Carrier, Airbase, or Airstrip within **5 hexes** of that Airbase. The Airbase adjacent to the Manufacturing Facility is still required for production.
+- Air units spawn at any Airbase, Airstrip, or Carrier within 5 hexes of the producing Factory (see Spawn Rules in Production section).
 
 **If the Carrier sinks (Phase 2):**
 - Air units mid-mission (launched in Phase 1): in Phase 4, they attempt to land at the nearest friendly airstrip or airbase within remaining movement. If none reachable → crash and destroyed.
