@@ -6,6 +6,7 @@
 import { executeGroundMoves } from './movement.js';
 import { executeGroundCombat } from './combat.js';
 import { runPhase4 } from './phase4.js';
+import { computeVisibility, markScouted } from './visibility.js';
 
 export async function resolveTurn(db, gameId) {
   const { data: game } = await db.from('games').select('current_turn').eq('id', gameId).single();
@@ -32,6 +33,14 @@ export async function resolveTurn(db, gameId) {
     .eq('id', gameId)
     .select()
     .single();
+
+  // Update scouted_hexes for all factions based on post-turn unit positions.
+  // This ensures fog-of-war is current when players load the map next turn.
+  const { data: factions } = await db.from('factions').select('id').eq('game_id', gameId);
+  for (const f of factions ?? []) {
+    const { visible } = await computeVisibility(db, f.id, gameId);
+    await markScouted(db, f.id, gameId, visible, nextTurn);
+  }
 
   return {
     game: updated,
