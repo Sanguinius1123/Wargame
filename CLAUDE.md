@@ -177,10 +177,12 @@ PATCH /api/map/:gameId/hexes/:q/:r  — GM edits terrain/attributes/owner
 POST /api/map/:gameId/orders         — queue orders; body: { unit_id, order_type, path[]|to_hex_q/r, target_hex_q/r }
 DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
 POST /api/map/:gameId/production     — queue unit production at a factory hex
-POST /api/gm/:gameId/units           — GM places unit (body: faction_id, unit_type_name, hex_q, hex_r, quantity)
+POST /api/gm/:gameId/units           — GM places unit; adds to existing stack if same type+hex exists
+PATCH /api/gm/:gameId/units/:id     — adjust unit quantity by delta { quantity_delta }; deletes if qty→0
 DELETE /api/gm/:gameId/units/:id
 PATCH /api/gm/:gameId/factions/:id/resources  — body: { materials, manpower }
-POST /api/gm/:gameId/advance-turn    — GM force-advance turn (calls executeGroundMoves)
+POST /api/gm/:gameId/advance-turn    — GM force-advance turn (full 4-phase pipeline)
+GET  /api/map/:gameId/orders/:unitId — current turn orders for a unit (player must own or be GM)
 ```
 
 ## Key Frontend Components
@@ -191,7 +193,9 @@ client/src/
     HexGrid.jsx    — SVG hex renderer. Props: hexes, onSelect, panZoom, selectedKey,
                      moveMode, movePath, onPathClick. Draws move arrows + path highlights.
     HexMap.jsx     — Loads hexes, renders HexGrid + detail/order panel. Manages move mode state.
-                     OrderPanel shows available orders for selected unit (player only).
+                     OrderPanel: Move + Fortify buttons with tooltips, current orders display, locked-in-combat banner.
+                     GMUnitRow: +/- quantity controls per unit (GM only).
+                     GMHexEditor: terrain/attributes/urban HP editor (GM only).
     UnitIcon.jsx   — Per-unit-type inline SVG icon.
     ProtectedRoute.jsx
   pages/
@@ -210,13 +214,29 @@ client/src/
 - [x] .env files configured (REGISTRATION_CODE=wargame)
 - [x] DESIGN.md complete — all mechanics fully designed and reviewed
 - [x] finish-turn + turn-status endpoints
-- [x] Production queue endpoint (POST /api/map/:gameId/production)
+- [x] Production queue endpoint + advancement in Phase 4
 - [x] Movement order UI (click unit → click hex waypoints → yellow arrows → confirm)
-- [x] Finish Turn button (player portal)
+- [x] Fortify order UI (button with tooltip, queued orders display)
+- [x] Finish Turn button (player portal); auto-advances when all players ready
 - [x] GM turn status panel (green/red dots per player)
-- [x] Movement validation + execution (server/src/utils/movement.js) — in progress
-- [ ] advance-turn rewritten with full 4-phase pipeline (Phase 1 air, 2 naval, 3 ground, 4 collect)
-- [ ] Combat resolution implemented (server/src/utils/combat.js)
-- [ ] GM hex editor UI (click hex on map → edit terrain/attributes panel)
-- [ ] Win condition check
-- [ ] Fog of war: unit-based visibility (currently scouted_hexes only; no unit LOS update in advance-turn)
+- [x] GM hex editor (terrain, attributes, urban HP)
+- [x] GM unit management: place adds to stack, +/- quantity controls in hex detail
+- [x] Movement validation + execution (server/src/utils/movement.js)
+- [x] Full 4-phase advance-turn pipeline via shared resolveTurn():
+      Phase 1 (air) — stub
+      Phase 2 (naval) — stub
+      Phase 3: retreats → ground movement → fortify → ranged fire (bombard + auto) → close combat
+      Phase 4: material collection, production queue, manpower BFS, win condition, FOW update
+- [x] Combat resolution (server/src/utils/combat.js) — roll-under 2d6, simultaneous, proportional fire
+- [x] Ranged fire step (server/src/utils/rangedFire.js) — bombard orders + auto direct fire
+- [x] Retreat + Pursue-if-Retreat (server/src/utils/retreat.js)
+- [x] Fog of war: unit LOS updates scouted_hexes each turn end
+- [x] Win condition check (≥2/3 settlements controlled at Phase 4 end)
+- [x] Buildings displayed in hex detail (HP-colored)
+- [x] Locked-in-combat banner on contested hexes
+- [ ] Phase 1 air system (flight groups, intercept, AA overwatch)
+- [ ] Phase 2 naval system
+- [ ] Bombard order UI (target hex selection for Artillery/Battleship)
+- [ ] Retreat/Pursue order UI (buttons shown only when locked in combat)
+- [ ] Combat log viewer (GM sees what happened each turn)
+- [ ] Production queue UI (player orders units from factory)
