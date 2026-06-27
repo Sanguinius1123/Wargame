@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { adminDb } from '../db.js';
 import { requireAuth, requireGM } from '../middleware/auth.js';
+import { resolveTurn } from '../utils/resolveTurn.js';
 
 const router = Router();
 
@@ -97,15 +98,8 @@ router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
   const allReady = players?.length > 0 && players.every(p => p.turn_ready);
 
   if (allReady) {
-    // Advance turn: clear orders, increment turn, reset turn_ready
-    const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
-    const nextTurn = (game?.current_turn ?? 1) + 1;
-
-    await adminDb.from('movement_orders').delete().eq('game_id', gameId).eq('turn', game.current_turn);
-    await adminDb.from('games').update({ current_turn: nextTurn }).eq('id', gameId);
-    await adminDb.from('game_participants').update({ turn_ready: false }).eq('game_id', gameId).eq('role', 'player');
-
-    return res.json({ advanced: true, current_turn: nextTurn });
+    const result = await resolveTurn(adminDb, gameId);
+    return res.json({ advanced: true, current_turn: result.game?.current_turn, phase3: result.phase3, phase4: result.phase4 });
   }
 
   res.json({ advanced: false, waiting_on: players?.filter(p => !p.turn_ready).length ?? 0 });
