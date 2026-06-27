@@ -224,6 +224,7 @@ Units have a combination of tags that describe what they are, what they can do, 
 | Infantry | ground |
 | Armor | ground + mobile + armored + mechanized |
 | Artillery | ground + heavy |
+| AT Gun | ground + heavy |
 | AA Gun | ground + air + heavy |
 | Supply | ground + mobile + mechanized |
 | Recon | ground + stealth |
@@ -483,7 +484,8 @@ Once detected, the unit is visible to that faction. The roll re-runs each turn �
 |---|---|---|---|
 | Infantry | 0 | 2 | Auto-detected in open; hidden in cover |
 | Armor | 0 | 2 | Auto-detected in open |
-| Artillery | 0 | 2 | |
+| Artillery | 0 | 2 | No direct fire; bombard only |
+| AT Gun | 0 | 2 | |
 | AA Gun | 0 | 4 | Specialized sensors |
 | Supply | 0 | 1 | |
 | Recon | 3 | 3 | Ignores heavy veg move penalty; Hold Fire available; Sabotage ability |
@@ -548,7 +550,7 @@ Standing order for units that can engage in close combat. A unit is eligible to 
 1. Has a To-Hit stat (can attack at all)
 2. Can fire at range 0 (fights in close combat — same hex)
 
-Artillery fails condition 2: its minimum attack range is 2 and it has 0 attack dice in close combat. Since patrol intercept always leads to same-hex combat, Artillery would be destroyed automatically upon intercepting. Units with no To-Hit stat (Supply, Scout Plane, Transport Plane, Transport ship) fail condition 1.
+Artillery fails condition 1: it has no To-Hit stat and no direct fire capability whatsoever. Units with no To-Hit stat (Artillery, Supply, Scout Plane, Transport Plane, Transport ship) fail condition 1.
 
 Patrolling units intercept enemies that move through their patrol area. The unit stays in place; the patrol area defines how far out it will react.
 
@@ -788,13 +790,14 @@ Ground:
 | Unit | To-Hit | Defense | Pen | Move | LOS | Atk Range | Mat | Man | Slots |
 |---|---|---|---|---|---|---|---|---|---|
 | Infantry | 6 | 6 | 0 | 2 | 3 | 1 | 1 | 0 | 1 |
-| Armor | 7 | 8 | 2 | 4 | 3 | 1 | 3 | 1 | 2 |
-| Artillery | 7 | 4 | 2 | 2 | 3 | 2 | 4 | 2 | 2 |
-| AA Gun | 5 | 4 | 1 | 1 | 3 | 1 | 2 | 1 | 1 |
+| Armor | 7 | 8 | 2 | 4 | 3 | 2 | 4 | 2 | 2 |
+| Artillery | — | 4 | 1 | 2 | 3 | — | 2 | 1 | 1 |
+| AT Gun | 7 | 4 | 2 | 2 | 3 | 2 | 2 | 1 | 1 |
+| AA Gun | 5 | 4 | 1 | 2 | 3 | 1 | 2 | 1 | 1 |
 | Supply | — | 3 | 0 | 4 | 3 | — | 2 | 1 | 1 |
 | Recon | 7 | 6 | 0 | 3 | 4 | 2 | 2 | 1 | 1 |
 
-**Atk Range** = direct fire range used in the ranged fire step and close combat. Artillery also has a **Bombard** special ability (indirect fire, range 8, 1 hex target) — see Bombardment section. Units on a Bombard order skip the Phase 3 ranged fire step.
+**Atk Range** = direct fire range used in the ranged fire step and close combat. Artillery has no Atk Range (—) — it has no direct fire capability and only operates via the Bombard order (indirect fire, range 8, 1 hex target — see Bombardment section). Units on a Bombard order skip the Phase 3 ranged fire step.
 
 **Recon special rules:**
 - **Stealth:** stealth 3, detection 3. See Stealth by Unit Type table. Defense is stealth — Recon units survive by not being found, not by absorbing hits.
@@ -815,7 +818,7 @@ These are standard air-to-air stats used in intercept combat. Bombers are poor d
 
 **Bomber HP** — bombers use a shared HP pool rather than quantity stacks. A group of 5 bombers has 15 HP. Every 3 HP lost removes 1 aircraft from the count (`quantity = ceil(current_hp / 3)`). Partial HP within a 3-HP band does not reduce count — the aircraft is damaged but still flying. In intercept, each aircraft fires 1 die at To-Hit 5, Pen 0; dice count = `ceil(current_hp / 3)`. Repaired at Airbase.
 
-**Artillery in direct combat** — artillery has 0 attack dice when enemies enter its hex. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
+**Artillery in direct combat** — artillery has no direct fire capability. It cannot participate in the ranged fire step and has no attack dice in close combat. It takes casualties normally. If artillery is the only friendly unit in a hex when combat resolves, it is automatically destroyed with no return fire.
 
 Naval (HP-based; attack dice per ship):
 
@@ -884,9 +887,9 @@ Blind fire (no friendly LOS to target) → bombardment resolves normally but pla
 - Cannot bombard if enemy units are present in the artillery's own hex (engaged in close combat — check before executing bombard orders)
 - Target pattern: **1 hex** at range 1–8 (minimum range 1; cannot fire into own hex)
 - **Elevation bonus:** `effective_bombard_range = 8 + max(0, firer_elevation − target_elevation)`. Artillery on Hills fires up to 9 hexes; on Mountains, up to 10 hexes. Terrain between firer and target does not block the shot arc (high-arc indirect fire).
-- Rolls: 1 die vs units + 1 die vs infra (To-Hit 7, Pen 2)
+- Rolls: 1 die vs units + 1 die vs infra (To-Hit 7, Pen 1)
 - Infrastructure selection: random among present pieces
-- No return fire from target; artillery has 0 attack dice in direct combat and is destroyed automatically if left alone against enemy units
+- No return fire from target; artillery has no direct fire capability and is completely helpless in close combat — destroyed automatically if enemies occupy its hex
 
 **Battleship** — special **Bombard** ability (indirect fire, range 8, 3-hex triangle). Normal Atk Range 3 applies to surface combat and the Phase 2 naval ranged fire step.
 - Directed bombardment: up to **8 hexes**. Can target **any hex** — land or water. Used to hit predicted enemy ship positions as well as shore targets. Resolves in Phase 3; ships that moved or sank in Phase 2 won't be there. May move and bombard in the same turn; cancelled only if an enemy ship engages it in close combat (hex collision or path crossing) during Phase 2 (see Phase 2 step 7). Taking fire from enemies during the Phase 2 ranged fire step does not cancel the bombard — the Battleship skips that step when it has a Bombard order, but being targeted by other ships' ranged fire does not void the order.
