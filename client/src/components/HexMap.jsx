@@ -44,7 +44,7 @@ const ORDER_TYPE_LABELS = {
   repair:  'Repair',
 };
 
-export default function HexMap({ gameId, isGM = false }) {
+export default function HexMap({ gameId, isGM = false, viewAsFactionId = null }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,15 +54,22 @@ export default function HexMap({ gameId, isGM = false }) {
   const [movePath, setMovePath] = useState([]);
   const [selectedUnit, setSelectedUnit] = useState(null);
 
+  // Bombard-order state
+  const [bombardMode, setBombardMode] = useState(false);
+  const [bombardTarget, setBombardTarget] = useState(null);
+
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
 
   const load = useCallback(async () => {
     const headers = await authHeader();
-    const r = await fetch(`${SERVER}/api/map/${gameId}/hexes`, { headers });
+    const url = viewAsFactionId
+      ? `${SERVER}/api/map/${gameId}/hexes?viewAs=${viewAsFactionId}`
+      : `${SERVER}/api/map/${gameId}/hexes`;
+    const r = await fetch(url, { headers });
     if (r.ok) setHexes(await r.json());
     setLoading(false);
-  }, [gameId]);
+  }, [gameId, viewAsFactionId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -84,22 +91,33 @@ export default function HexMap({ gameId, isGM = false }) {
   // Called when player clicks a hex in normal mode
   const handleSelect = useCallback((hex) => {
     setSelected(hex);
-    if (!isGM) {
-      const unit = hex.units?.[0] ?? null;
+    const isPlayerMode = !isGM || viewAsFactionId;
+    if (isPlayerMode) {
+      // When acting as a faction, only auto-select units belonging to that faction
+      let unit = null;
+      if (viewAsFactionId) {
+        unit = hex.units?.find(u => u.factionId === viewAsFactionId) ?? null;
+      } else {
+        unit = hex.units?.[0] ?? null;
+      }
       setSelectedUnit(unit);
-      // Exit move mode if they click a new hex without confirming
       setMoveMode(false);
       setMovePath([]);
+      setBombardMode(false);
+      setBombardTarget(null);
       setCurrentOrders([]);
       fetchOrders(unit?.id ?? null);
     }
-  }, [isGM, fetchOrders]);
+  }, [isGM, viewAsFactionId, fetchOrders]);
 
-  // Called when player clicks a hex while in move mode
-  const handlePathClick = useCallback((hex) => {
-    const wp = { q: hex.hex_q, r: hex.hex_r };
-    setMovePath(prev => [...prev, wp]);
-  }, []);
+  // Called when a hex is clicked during move or bombard mode
+  const handleModeClick = useCallback((hex) => {
+    if (moveMode) {
+      setMovePath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
+    } else if (bombardMode) {
+      setBombardTarget({ q: hex.hex_q, r: hex.hex_r });
+    }
+  }, [moveMode, bombardMode]);
 
   const enterMoveMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -117,7 +135,6 @@ export default function HexMap({ gameId, isGM = false }) {
   const cancelMove = useCallback(() => {
     setMoveMode(false);
     setMovePath([]);
-    // Restore orders display
     fetchOrders(selectedUnit?.id ?? null);
   }, [selectedUnit, fetchOrders]);
 
@@ -130,6 +147,7 @@ export default function HexMap({ gameId, isGM = false }) {
       body: JSON.stringify({
         unit_id: selectedUnit.id,
         path: movePath,
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
       }),
     });
     setMoveMode(false);
@@ -138,7 +156,69 @@ export default function HexMap({ gameId, isGM = false }) {
     setSelectedUnit(null);
     setSelected(null);
     load();
-  }, [selectedUnit, movePath, gameId, load]);
+  }, [selectedUnit, movePath, gameId, viewAsFactionId, load]);
+
+  const enterBombardMode = useCallback(() => {
+    if (!selectedUnit) return;
+    setBombardMode(true);
+    setBombardTarget(null);
+    setCurrentOrders([]);
+  }, [selectedUnit]);
+
+  const cancelBombard = useCallback(() => {
+    setBombardMode(false);
+    setBombardTarget(null);
+    fetchOrders(selectedUnit?.id ?? null);
+  }, [selectedUnit, fetchOrders]);
+
+  const confirmBombard = useCallback(async () => {
+    if (!selectedUnit || !bombardTarget) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'bombard',
+        target_hex_q: bombardTarget.q,
+        target_hex_r: bombardTarget.r,
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    setBombardMode(false);
+    setBombardTarget(null);
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, bombardTarget, gameId, viewAsFactionId, fetchOrders]);
+
+  const retreatUnit = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'retreat',
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
+
+  const pursueUnit = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'pursue_if_retreat',
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
 
   const clearOrders = useCallback(async () => {
     if (!selectedUnit) return;
@@ -159,12 +239,14 @@ export default function HexMap({ gameId, isGM = false }) {
     await fetch(`${SERVER}/api/map/${gameId}/orders`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unit_id: selectedUnit.id, order_type: 'fortify' }),
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'fortify',
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
     });
-    // Reload orders
-    const r2 = await fetch(`${SERVER}/api/map/${gameId}/orders/${selectedUnit.id}`, { headers });
-    if (r2.ok) { const d = await r2.json(); setCurrentOrders(d.orders ?? []); }
-  }, [selectedUnit, gameId]);
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
@@ -179,7 +261,9 @@ export default function HexMap({ gameId, isGM = false }) {
               selectedKey={selectedKey}
               moveMode={moveMode}
               movePath={movePath}
-              onPathClick={handlePathClick}
+              bombardMode={bombardMode}
+              bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
+              onPathClick={handleModeClick}
             />
         }
       </div>
@@ -189,17 +273,25 @@ export default function HexMap({ gameId, isGM = false }) {
         {selected
           ? <HexDetail
               hex={selected}
-              isGM={isGM}
+              isGM={isGM && !viewAsFactionId}
+              viewingAsFaction={!!viewAsFactionId}
               gameId={gameId}
               onRefresh={load}
               selectedUnit={selectedUnit}
               moveMode={moveMode}
               movePath={movePath}
+              bombardMode={bombardMode}
+              bombardTarget={bombardTarget}
               onEnterMoveMode={enterMoveMode}
               onConfirmMove={confirmMove}
               onCancelMove={cancelMove}
+              onEnterBombardMode={enterBombardMode}
+              onConfirmBombard={confirmBombard}
+              onCancelBombard={cancelBombard}
               onClearOrders={clearOrders}
               onFortify={fortifyUnit}
+              onRetreat={retreatUnit}
+              onPursue={pursueUnit}
               currentOrders={currentOrders}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
@@ -219,16 +311,24 @@ function Tag({ label, color }) {
 function HexDetail({
   hex,
   isGM,
+  viewingAsFaction,
   gameId,
   onRefresh,
   selectedUnit,
   moveMode,
   movePath,
+  bombardMode,
+  bombardTarget,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
+  onEnterBombardMode,
+  onConfirmBombard,
+  onCancelBombard,
   onClearOrders,
   onFortify,
+  onRetreat,
+  onPursue,
   currentOrders,
 }) {
   const vis = hex.visibility ?? 'visible';
@@ -318,17 +418,24 @@ function HexDetail({
             <p style={{ color: '#4b5563', fontSize: 13 }}>No units</p>
           )}
 
-          {/* Order panel — players only, when a unit is selected */}
-          {!isGM && selectedUnit && (
+          {/* Order panel — players and GM-acting-as-player, when a unit is selected */}
+          {(!isGM || viewingAsFaction) && selectedUnit && (
             <OrderPanel
               unit={selectedUnit}
               moveMode={moveMode}
               movePath={movePath}
+              bombardMode={bombardMode}
+              bombardTarget={bombardTarget}
               onEnterMoveMode={onEnterMoveMode}
               onConfirmMove={onConfirmMove}
               onCancelMove={onCancelMove}
+              onEnterBombardMode={onEnterBombardMode}
+              onConfirmBombard={onConfirmBombard}
+              onCancelBombard={onCancelBombard}
               onClearOrders={onClearOrders}
               onFortify={onFortify}
+              onRetreat={onRetreat}
+              onPursue={onPursue}
               currentOrders={currentOrders}
               isContested={isContested}
             />
@@ -484,16 +591,24 @@ function OrderPanel({
   unit,
   moveMode,
   movePath,
+  bombardMode,
+  bombardTarget,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
+  onEnterBombardMode,
+  onConfirmBombard,
+  onCancelBombard,
   onClearOrders,
   onFortify,
+  onRetreat,
+  onPursue,
   currentOrders,
   isContested,
 }) {
   const hasPath = movePath.length >= 2;
   const moveSteps = currentOrders.filter(o => o.order_type === 'move').length;
+  const canBombard = unit.bombard_to_hit != null || unit.bombard_range != null;
 
   // Build a summary list of queued order types (deduplicated for non-move orders)
   const orderSummary = [];
@@ -507,12 +622,10 @@ function OrderPanel({
     orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
   }
 
+  const inAnyMode = moveMode || bombardMode;
+
   return (
-    <div style={{
-      marginTop: 16,
-      borderTop: '1px solid #1e293b',
-      paddingTop: 12,
-    }}>
+    <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
       {/* Selected unit info */}
       <div style={{ marginBottom: 10 }}>
         <p style={STAT_LABEL}>Selected Unit</p>
@@ -522,79 +635,123 @@ function OrderPanel({
             background: unit.factionColor ?? '#60a5fa',
             display: 'inline-block', flexShrink: 0,
           }} />
-          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>
-            {unit.type}
-          </span>
+          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>{unit.type}</span>
           <span style={{ color: '#94a3b8', fontSize: 12 }}>
             {unit.hp != null ? `${unit.hp} HP` : `×${unit.quantity}`}
           </span>
         </div>
-        {unit.standing_order && (
-          <Tag label={unit.standing_order} color="#6366f1" />
-        )}
+        {unit.standing_order && <Tag label={unit.standing_order} color="#6366f1" />}
       </div>
 
-      {/* Queued orders display (only when not in move mode) */}
-      {!moveMode && orderSummary.length > 0 && (
+      {/* Queued orders display */}
+      {!inAnyMode && orderSummary.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           <p style={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}>Queued orders:</p>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
             {orderSummary.map((label, i) => (
-              <li key={i} style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>
-                • {label}
-              </li>
+              <li key={i} style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>• {label}</li>
             ))}
           </ul>
         </div>
       )}
 
       {/* Contested notice */}
-      {isContested && !moveMode && (
+      {isContested && !inAnyMode && (
         <p style={{ color: '#fca5a5', fontSize: 11, marginBottom: 8 }}>
-          Locked in combat — only Retreat or Pursue orders are valid this turn.
+          Locked in combat — use Retreat or Pursue if Retreat.
         </p>
       )}
 
-      {/* Move mode state */}
-      {moveMode ? (
+      {/* Move mode */}
+      {moveMode && (
         <div>
           <p style={{ color: '#fbbf24', fontSize: 11, marginBottom: 8 }}>
-            Click destination hexes to add waypoints ({movePath.length - 1} step{movePath.length !== 2 ? 's' : ''} planned).
+            Click hexes to add waypoints — {movePath.length - 1} step{movePath.length !== 2 ? 's' : ''} plotted.
+          </p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button style={{ ...BTN.base, ...BTN.confirm, opacity: hasPath ? 1 : 0.5 }} disabled={!hasPath} onClick={onConfirmMove}>
+              Confirm Move
+            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelMove}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Bombard mode */}
+      {bombardMode && (
+        <div>
+          <p style={{ color: '#fb923c', fontSize: 11, marginBottom: 8 }}>
+            Click the target hex to bombard.{bombardTarget ? ` Target: (${bombardTarget.q}, ${bombardTarget.r})` : ''}
           </p>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
-              style={{ ...BTN.base, ...BTN.confirm, opacity: hasPath ? 1 : 0.5 }}
-              disabled={!hasPath}
-              onClick={onConfirmMove}
+              style={{ ...BTN.base, background: '#c2410c', color: '#fff', opacity: bombardTarget ? 1 : 0.5 }}
+              disabled={!bombardTarget}
+              onClick={onConfirmBombard}
+              title="Confirm Bombard: Unit will remain stationary and fire indirect bombardment at the target hex this turn."
             >
-              Confirm Move
+              Confirm Bombard
             </button>
-            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelMove}>
-              Cancel
-            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelBombard}>Cancel</button>
           </div>
         </div>
-      ) : (
+      )}
+
+      {/* Normal buttons (not in any mode) */}
+      {!inAnyMode && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            style={{ ...BTN.base, ...BTN.move, opacity: isContested ? 0.4 : 1 }}
-            disabled={isContested}
-            title="Move: Plot a movement path for this unit"
-            onClick={onEnterMoveMode}
-          >
-            Move
-          </button>
-          <button
-            style={{ ...BTN.base, background: '#7c3aed', color: '#e2e8f0', opacity: isContested ? 0.4 : 1 }}
-            disabled={isContested}
-            title="Fortify: Dig in for +1 defense. Bonus persists until you move. Cancelled if enemies enter before completion."
-            onClick={onFortify}
-          >
-            Fortify
-          </button>
+          {/* Contested-only: Retreat + Pursue */}
+          {isContested && (
+            <>
+              <button
+                style={{ ...BTN.base, background: '#7f1d1d', color: '#fca5a5' }}
+                onClick={onRetreat}
+                title="Retreat: Move to an adjacent non-enemy hex. You will take parting fire as you leave, but do not fight back. Invalid if surrounded."
+              >
+                Retreat
+              </button>
+              <button
+                style={{ ...BTN.base, background: '#92400e', color: '#fde68a' }}
+                onClick={onPursue}
+                title="Pursue if Retreat: If the enemy retreats this turn, roll to pursue. 2d6 ≤ (5 + your speed − their speed). Natural 2 always succeeds; natural 12 always fails."
+              >
+                Pursue if Retreat
+              </button>
+            </>
+          )}
+
+          {/* Non-contested: standard orders */}
+          {!isContested && (
+            <>
+              <button
+                style={{ ...BTN.base, ...BTN.move }}
+                title="Move: Click hexes on the map to plot a movement path."
+                onClick={onEnterMoveMode}
+              >
+                Move
+              </button>
+              <button
+                style={{ ...BTN.base, background: '#7c3aed', color: '#e2e8f0' }}
+                title="Fortify: Dig in for +1 defense. Bonus persists until you move. Cancelled if enemies enter before completion."
+                onClick={onFortify}
+              >
+                Fortify
+              </button>
+              {canBombard && (
+                <button
+                  style={{ ...BTN.base, background: '#c2410c', color: '#fed7aa' }}
+                  title="Bombard: Click a target hex on the map to direct indirect fire. Unit must stay stationary. Artillery fires 1 die vs units + 1 vs infrastructure per piece."
+                  onClick={onEnterBombardMode}
+                >
+                  Bombard
+                </button>
+              )}
+            </>
+          )}
+
           <button
             style={{ ...BTN.base, ...BTN.clear }}
-            title="Clear Orders: Remove all queued orders for this unit this turn"
+            title="Clear Orders: Remove all queued orders for this unit this turn."
             onClick={onClearOrders}
           >
             Clear Orders

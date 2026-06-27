@@ -9,7 +9,7 @@ const router = Router();
 router.get('/', requireAuth, async (req, res) => {
   const { data, error } = await adminDb
     .from('game_participants')
-    .select('role, games(id, name, current_turn, current_phase, created_at)')
+    .select('role, games(id, name, current_turn, current_phase, auto_resolve, created_at)')
     .eq('profile_id', req.user.id);
 
   if (error) return res.status(500).json({ error: error.message });
@@ -89,17 +89,20 @@ router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
   if (markErr) return res.status(500).json({ error: markErr.message });
 
   // Check if all players are ready
-  const { data: players } = await adminDb
-    .from('game_participants')
-    .select('turn_ready')
-    .eq('game_id', gameId)
-    .eq('role', 'player');
+  const [{ data: players }, { data: game }] = await Promise.all([
+    adminDb.from('game_participants').select('turn_ready').eq('game_id', gameId).eq('role', 'player'),
+    adminDb.from('games').select('auto_resolve').eq('id', gameId).single(),
+  ]);
 
   const allReady = players?.length > 0 && players.every(p => p.turn_ready);
 
-  if (allReady) {
+  if (allReady && game?.auto_resolve !== false) {
     const result = await resolveTurn(adminDb, gameId);
     return res.json({ advanced: true, current_turn: result.game?.current_turn, phase3: result.phase3, phase4: result.phase4 });
+  }
+
+  if (allReady && game?.auto_resolve === false) {
+    return res.json({ advanced: false, waiting_on: 0, gm_commit_required: true });
   }
 
   res.json({ advanced: false, waiting_on: players?.filter(p => !p.turn_ready).length ?? 0 });

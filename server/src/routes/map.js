@@ -55,7 +55,10 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     buildingsByHex[k].push({ type: b.type, current_hp: b.current_hp, max_hp: b.max_hp, owner_faction_id: b.owner_faction_id });
   }
 
-  if (isGM) {
+  // GM viewing as a specific faction: apply that faction's FOW
+  const viewAsFactionId = isGM ? (req.query.viewAs ?? null) : null;
+
+  if (isGM && !viewAsFactionId) {
     return res.json(hexes.map(h => {
       const hexKey = `${h.hex_q},${h.hex_r}`;
       return {
@@ -67,13 +70,10 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     }));
   }
 
-  // Player path: find their faction, compute visibility
-  const { data: faction } = await adminDb
-    .from('factions')
-    .select('id')
-    .eq('game_id', gameId)
-    .eq('profile_id', req.user.id)
-    .single();
+  // Player path (or GM viewing as a faction): find their faction, compute visibility
+  const { data: faction } = isGM
+    ? await adminDb.from('factions').select('id').eq('id', viewAsFactionId).single()
+    : await adminDb.from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).single();
 
   if (!faction) return res.status(403).json({ error: 'Not a participant in this game' });
 
@@ -153,19 +153,29 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
 });
 
 // POST /api/map/:gameId/orders — player queues orders for a unit
-// Body: { unit_id, order_type, to_hex_q?, to_hex_r?, target_hex_q?, target_hex_r?, path? }
+// Body: { unit_id, order_type, to_hex_q?, to_hex_r?, target_hex_q?, target_hex_r?, path?, asFactionId? }
 // path is an array of {q, r} steps for multi-hex movement; clears previous orders for this unit.
+// asFactionId: GM only — act on behalf of that faction (for testing / "view as player" mode).
 router.post('/:gameId/orders', requireAuth, async (req, res) => {
-  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path } = req.body;
+  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path, asFactionId } = req.body;
+  const isGM = req.user.global_role === 'gm';
 
-  // Verify player owns the unit
+  // Verify ownership: GM can act for any faction; players must own the unit
   const { data: unit } = await adminDb
     .from('units')
-    .select('id, factions(profile_id)')
+    .select('id, faction_id, factions(profile_id)')
     .eq('id', unit_id)
     .single();
 
-  if (!unit || unit.factions?.profile_id !== req.user.id) {
+  if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+  if (isGM) {
+    // GM acting as faction: verify unit belongs to the specified faction
+    if (asFactionId && unit.faction_id !== asFactionId) {
+      return res.status(403).json({ error: 'Unit does not belong to that faction' });
+    }
+    // GM without asFactionId: full access, no restriction
+  } else if (unit.factions?.profile_id !== req.user.id) {
     return res.status(403).json({ error: 'Not your unit' });
   }
 
@@ -248,15 +258,18 @@ router.post('/:gameId/production', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/map/:gameId/orders/:unitId — clear all orders for a unit this turn
+// GM can clear orders for any unit (for "view as player" and testing).
 router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
-  const { data: unit } = await adminDb
-    .from('units')
-    .select('id, factions(profile_id)')
-    .eq('id', req.params.unitId)
-    .single();
-
-  if (!unit || unit.factions?.profile_id !== req.user.id) {
-    return res.status(403).json({ error: 'Not your unit' });
+  const isGM = req.user.global_role === 'gm';
+  if (!isGM) {
+    const { data: unit } = await adminDb
+      .from('units')
+      .select('id, factions(profile_id)')
+      .eq('id', req.params.unitId)
+      .single();
+    if (!unit || unit.factions?.profile_id !== req.user.id) {
+      return res.status(403).json({ error: 'Not your unit' });
+    }
   }
 
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();

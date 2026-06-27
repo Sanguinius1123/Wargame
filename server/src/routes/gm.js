@@ -108,6 +108,24 @@ router.patch('/:gameId/factions/:factionId/resources', requireGM, async (req, re
   res.json(data);
 });
 
+// PATCH /api/gm/:gameId/settings — update game-level GM settings
+// Body: { auto_resolve?: boolean }
+router.patch('/:gameId/settings', requireGM, async (req, res) => {
+  const { auto_resolve } = req.body;
+  const updates = {};
+  if (auto_resolve !== undefined) updates.auto_resolve = auto_resolve;
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+  const { data, error } = await adminDb
+    .from('games')
+    .update(updates)
+    .eq('id', req.params.gameId)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // POST /api/gm/:gameId/advance-turn — resolve current turn and advance
 router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   try {

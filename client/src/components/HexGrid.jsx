@@ -66,6 +66,8 @@ export default function HexGrid({
   selectedKey = null,
   moveMode = false,
   movePath = [],
+  bombardMode = false,
+  bombardTargetKey = null,
   onPathClick,
 }) {
   const safeHexes = hexes ?? [];
@@ -119,12 +121,12 @@ export default function HexGrid({
 
   const handleHexClick = useCallback((h) => {
     if (dragRef.current?.moved) return;
-    if (moveMode) {
+    if (moveMode || bombardMode) {
       onPathClick?.(h);
     } else {
       onSelect?.(h);
     }
-  }, [onSelect, moveMode, onPathClick]);
+  }, [onSelect, moveMode, bombardMode, onPathClick]);
 
   const handleHexDbl = useCallback((h, e) => {
     e.stopPropagation();
@@ -151,7 +153,7 @@ export default function HexGrid({
     <svg
       ref={svgRef}
       viewBox={viewBox}
-      style={{ width: '100%', height: '100%', cursor: moveMode ? 'crosshair' : (panZoom ? 'grab' : 'default'), display: 'block' }}
+      style={{ width: '100%', height: '100%', cursor: (moveMode || bombardMode) ? 'crosshair' : (panZoom ? 'grab' : 'default'), display: 'block' }}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
@@ -167,6 +169,7 @@ export default function HexGrid({
         const hexKey = `${h.hex_q},${h.hex_r}`;
         const isSelected = hexKey === selectedKey;
         const isInPath = movePathKeys.has(hexKey);
+        const isBombardTarget = hexKey === bombardTargetKey;
         const baseColor = isDark ? '#080d15' : (TERRAIN_COLORS[h.terrain] ?? '#334155');
         const topUnits = isDark || isScouted ? [] : getTopUnits(h.units);
 
@@ -174,7 +177,7 @@ export default function HexGrid({
           <g key={hexKey}
             onClick={() => handleHexClick(h)}
             onDoubleClick={(e) => handleHexDbl(h, e)}
-            style={{ cursor: isDark ? 'default' : (moveMode ? 'crosshair' : 'pointer') }}
+            style={{ cursor: isDark ? 'default' : ((moveMode || bombardMode) ? 'crosshair' : 'pointer') }}
           >
             {/* Hex fill */}
             <polygon
@@ -199,6 +202,17 @@ export default function HexGrid({
                 points={hexCorners(cx, cy, SIZE - 1)}
                 fill="rgba(250,204,21,0.25)"
                 stroke="none"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
+            {/* Bombard target highlight */}
+            {isBombardTarget && (
+              <polygon
+                points={hexCorners(cx, cy, SIZE - 1)}
+                fill="rgba(239,68,68,0.30)"
+                stroke="#ef4444"
+                strokeWidth={2}
                 style={{ pointerEvents: 'none' }}
               />
             )}

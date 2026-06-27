@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import HexMap from '../components/HexMap';
 
@@ -29,6 +29,7 @@ export default function GMDashboard() {
   const [addForm, setAddForm] = useState({ username: '', name: '', color: '#ef4444' });
   const [unitForm, setUnitForm] = useState({ factionId: '', type: 'Infantry', q: 0, r: 0, qty: 1 });
   const [turnStatus, setTurnStatus] = useState([]);
+  const [autoResolve, setAutoResolve] = useState(true);
   const [msg, setMsg] = useState('');
 
   async function headers() {
@@ -44,7 +45,7 @@ export default function GMDashboard() {
       fetch(`${SERVER}/api/games/${gameId}/participants`, { headers: h }),
       fetch(`${SERVER}/api/games/${gameId}/turn-status`, { headers: h }),
     ]);
-    if (gr.ok) { const gs = await gr.json(); setGame(gs.find(g => g.id === gameId)); }
+    if (gr.ok) { const gs = await gr.json(); const g = gs.find(g => g.id === gameId); setGame(g); if (g) setAutoResolve(g.auto_resolve ?? true); }
     if (fr.ok) setFactions(await fr.json());
     if (pr.ok) setParticipants(await pr.json());
     if (ts.ok) setTurnStatus(await ts.json());
@@ -80,6 +81,15 @@ export default function GMDashboard() {
     if (r.ok) { setMsg('Turn advanced.'); load(); } else setMsg('Error advancing turn.');
   }
 
+  async function toggleAutoResolve(val) {
+    setAutoResolve(val);
+    const h = await headers();
+    await fetch(`${SERVER}/api/gm/${gameId}/settings`, {
+      method: 'PATCH', headers: h,
+      body: JSON.stringify({ auto_resolve: val }),
+    });
+  }
+
   const unitTypes = [
     'Infantry','Armor','Artillery','AT Gun','AA Gun','Supply','Recon',
     'Fighter','Scout Plane','Bomber','Transport Plane',
@@ -93,6 +103,11 @@ export default function GMDashboard() {
         <div style={{ color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>GM Dashboard — {game?.name ?? '…'}</div>
         <div style={{ color: '#64748b', fontSize: 14 }}>Turn {game?.current_turn ?? '—'}</div>
         <button style={s.advBtn} onClick={advanceTurn}>Advance Turn</button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}
+          title="When checked, the turn auto-advances once all players click Finish Turn. Uncheck to require GM to manually commit each turn.">
+          <input type="checkbox" checked={autoResolve} onChange={e => toggleAutoResolve(e.target.checked)} />
+          Auto-resolve when all ready
+        </label>
       </div>
 
       {msg && <p style={{ color: '#fbbf24', marginBottom: 12, fontSize: 13 }}>{msg}</p>}
@@ -125,7 +140,14 @@ export default function GMDashboard() {
                 <div style={s.dot(f.color)} />
                 <span style={{ color: '#e2e8f0', fontSize: 13 }}>{f.name}</span>
                 <span style={{ color: '#64748b', fontSize: 11 }}>({f.profiles?.username})</span>
-                <span style={{ color: '#fbbf24', fontSize: 11, marginLeft: 'auto' }}>Mat:{f.materials} Man:{f.manpower}</span>
+                <span style={{ color: '#fbbf24', fontSize: 11 }}>Mat:{f.materials} Man:{f.manpower}</span>
+                <button
+                  style={{ background: 'none', border: '1px solid #334155', borderRadius: 3, padding: '2px 7px', color: '#94a3b8', fontSize: 11, cursor: 'pointer', marginLeft: 'auto' }}
+                  title={`View the game as ${f.name} — see their FOW, give orders on their behalf`}
+                  onClick={() => nav(`/game/${gameId}?viewAs=${f.id}`)}
+                >
+                  View as
+                </button>
               </div>
             ))}
             <form onSubmit={addFaction} style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 12 }}>

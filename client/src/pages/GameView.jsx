@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import HexMap from '../components/HexMap';
@@ -22,6 +22,10 @@ export default function GameView() {
   const { gameId } = useParams();
   const { profile } = useAuth();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
+  // GM can pass ?viewAs=factionId to impersonate a player's view
+  const viewAsFactionId = searchParams.get('viewAs') ?? null;
+
   const [game, setGame] = useState(null);
   const [faction, setFaction] = useState(null);
   const [turnReady, setTurnReady] = useState(false);
@@ -47,7 +51,12 @@ export default function GameView() {
       }
       if (fr.ok) {
         const factions = await fr.json();
-        setFaction(factions.find(f => f.profiles?.id === profile?.id || f.profile_id === profile?.id));
+        // If GM viewing as a faction, show that faction's resources
+        if (viewAsFactionId) {
+          setFaction(factions.find(f => f.id === viewAsFactionId));
+        } else {
+          setFaction(factions.find(f => f.profiles?.id === profile?.id || f.profile_id === profile?.id));
+        }
       }
     })();
   }, [gameId, profile]);
@@ -68,12 +77,32 @@ export default function GameView() {
   return (
     <div style={s.page}>
       <div style={s.head}>
-        <button style={s.back} onClick={() => nav('/')}>← Games</button>
+        {viewAsFactionId
+          ? <button style={s.back} onClick={() => nav(`/gm/${gameId}`)}>← GM Dashboard</button>
+          : <button style={s.back} onClick={() => nav('/')}>← Games</button>
+        }
         <div>
           <div style={s.h1}>{game?.name ?? '…'}</div>
           <div style={s.sub}>Turn {game?.current_turn ?? '—'} · {game?.current_phase ?? '—'}</div>
         </div>
       </div>
+
+      {/* GM viewing as player banner */}
+      {viewAsFactionId && faction && (
+        <div style={{
+          background: '#1c1917', border: '1px solid #d97706', borderRadius: 6,
+          padding: '6px 14px', marginBottom: 14,
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 14 }}>👁</span>
+          <span style={{ color: '#fbbf24', fontSize: 13, fontWeight: 700 }}>
+            GM — Viewing as {faction.name}
+          </span>
+          <span style={{ color: '#78716c', fontSize: 12 }}>
+            Orders placed here will be submitted on their behalf.
+          </span>
+        </div>
+      )}
 
       {faction && (
         <div style={s.resources}>
@@ -108,7 +137,7 @@ export default function GameView() {
         {turnMsg && <span style={{ color: '#94a3b8', fontSize: 13 }}>{turnMsg}</span>}
       </div>
 
-      <HexMap gameId={gameId} isGM={false} />
+      <HexMap gameId={gameId} isGM={false} viewAsFactionId={viewAsFactionId} />
     </div>
   );
 }
