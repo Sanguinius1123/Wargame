@@ -11,6 +11,7 @@ router.post('/:gameId/units', requireGM, async (req, res) => {
   const { data: unitType } = await adminDb
     .from('unit_type_config')
     .select('id')
+    .eq('game_id', req.params.gameId)
     .eq('name', unit_type_name)
     .single();
 
@@ -41,9 +42,9 @@ router.delete('/:gameId/units/:unitId', requireGM, async (req, res) => {
 
 // PATCH /api/gm/:gameId/factions/:factionId/resources
 router.patch('/:gameId/factions/:factionId/resources', requireGM, async (req, res) => {
-  const { production, manpower } = req.body;
+  const { materials, manpower } = req.body;
   const updates = {};
-  if (production !== undefined) updates.production = production;
+  if (materials !== undefined) updates.materials = materials;
   if (manpower !== undefined) updates.manpower = manpower;
 
   const { data, error } = await adminDb
@@ -61,55 +62,28 @@ router.patch('/:gameId/factions/:factionId/resources', requireGM, async (req, re
 router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
 
-  // Simple advance: increment turn, clear orders, collect resources
-  const nextTurn = (game?.current_turn ?? 0) + 1;
+  const currentTurn = game?.current_turn ?? 0;
+  const nextTurn = currentTurn + 1;
 
-  // Collect resources from owned hexes
-  const { data: hexes } = await adminDb
-    .from('hexes')
-    .select('owner_faction_id, terrain, development, terrain_type_config(production, manpower)')
-    .eq('game_id', req.params.gameId)
-    .not('owner_faction_id', 'is', null);
+  // TODO: implement full 4-phase resolution pipeline (combat, movement, production, collection)
+  // For now: just clear orders and increment the turn counter.
 
-  const factionDeltas = {};
-  for (const hex of hexes ?? []) {
-    const fid = hex.owner_faction_id;
-    if (!factionDeltas[fid]) factionDeltas[fid] = { production: 0, manpower: 0 };
-    const dev = Math.max(1, hex.development);
-    factionDeltas[fid].production += (hex.terrain_type_config?.production ?? 0) * dev;
-    factionDeltas[fid].manpower   += (hex.terrain_type_config?.manpower   ?? 0) * dev;
-  }
-
-  for (const [fid, delta] of Object.entries(factionDeltas)) {
-    const { data: faction } = await adminDb.from('factions').select('production, manpower').eq('id', fid).single();
-    await adminDb.from('factions').update({
-      production: (faction?.production ?? 0) + delta.production,
-      manpower:   (faction?.manpower   ?? 0) + delta.manpower,
-    }).eq('id', fid);
-  }
-
-  // Apply movement orders
-  const { data: orders } = await adminDb
+  // Clear movement orders for this turn
+  await adminDb
     .from('movement_orders')
-    .select('unit_id, to_hex_q, to_hex_r')
+    .delete()
     .eq('game_id', req.params.gameId)
-    .eq('turn', game.current_turn);
-
-  for (const order of orders ?? []) {
-    await adminDb.from('units').update({ hex_q: order.to_hex_q, hex_r: order.to_hex_r }).eq('id', order.unit_id);
-  }
-
-  // Clear orders for this turn
-  await adminDb.from('movement_orders').delete().eq('game_id', req.params.gameId).eq('turn', game.current_turn);
+    .eq('turn', currentTurn);
 
   // Advance turn
-  const { data: updated } = await adminDb
+  const { data: updated, error } = await adminDb
     .from('games')
     .update({ current_turn: nextTurn })
     .eq('id', req.params.gameId)
     .select()
     .single();
 
+  if (error) return res.status(500).json({ error: error.message });
   res.json(updated);
 });
 

@@ -14,7 +14,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all hexes (GM queries bypass RLS via adminDb)
   const { data: hexes, error } = await adminDb
     .from('hexes')
-    .select('id, hex_q, hex_r, terrain, development, owner_faction_id')
+    .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, has_road, has_canal, has_railroad')
     .eq('game_id', gameId);
   if (error) return res.status(500).json({ error: error.message });
 
@@ -67,7 +67,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
       return { ...h, units: unitsByHex[k] ?? [], visibility: 'visible' };
     }
     if (scouted.has(k)) {
-      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, development: h.development, visibility: 'scouted', units: [] };
+      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [] };
     }
     return { hex_q: h.hex_q, hex_r: h.hex_r, visibility: 'dark', units: [] };
   }));
@@ -100,12 +100,23 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
 // PATCH /api/map/:gameId/hexes/:q/:r — GM edits a hex
 router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
   const { gameId, q, r } = req.params;
-  const { terrain, development, owner_faction_id } = req.body;
+  const {
+    terrain, owner_faction_id,
+    has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp,
+    has_settlement, has_road, has_canal, has_railroad,
+  } = req.body;
 
   const updates = {};
   if (terrain !== undefined) updates.terrain = terrain;
-  if (development !== undefined) updates.development = development;
   if (owner_faction_id !== undefined) updates.owner_faction_id = owner_faction_id;
+  if (has_light_vegetation !== undefined) updates.has_light_vegetation = has_light_vegetation;
+  if (has_heavy_vegetation !== undefined) updates.has_heavy_vegetation = has_heavy_vegetation;
+  if (has_urban !== undefined) updates.has_urban = has_urban;
+  if (urban_hp !== undefined) updates.urban_hp = urban_hp;
+  if (has_settlement !== undefined) updates.has_settlement = has_settlement;
+  if (has_road !== undefined) updates.has_road = has_road;
+  if (has_canal !== undefined) updates.has_canal = has_canal;
+  if (has_railroad !== undefined) updates.has_railroad = has_railroad;
 
   const { data, error } = await adminDb
     .from('hexes')
