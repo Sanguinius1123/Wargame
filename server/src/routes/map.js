@@ -21,7 +21,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all units grouped by hex
   const { data: units } = await adminDb
     .from('units')
-    .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags)')
+    .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, bombard_to_hit, bombard_range)')
     .eq('game_id', gameId);
 
   const unitsByHex = {};
@@ -32,6 +32,8 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
       id: u.id,
       type: u.unit_type_config?.name,
       tags: u.unit_type_config?.tags ?? [],
+      bombard_to_hit: u.unit_type_config?.bombard_to_hit ?? null,
+      bombard_range:  u.unit_type_config?.bombard_range  ?? null,
       quantity: u.quantity,
       hp: u.hp,
       standing_order: u.standing_order,
@@ -266,6 +268,7 @@ router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
       .from('units')
       .select('id, factions(profile_id)')
       .eq('id', req.params.unitId)
+      .eq('game_id', req.params.gameId)
       .single();
     if (!unit || unit.factions?.profile_id !== req.user.id) {
       return res.status(403).json({ error: 'Not your unit' });

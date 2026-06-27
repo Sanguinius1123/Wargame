@@ -281,6 +281,18 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     const tr = bombardTarget.target_hex_r;
     if (tq == null || tr == null) continue;
 
+    // Range check — skip if target is out of bombard range.
+    if (cfg.bombard_range != null) {
+      const dist = hexDist(unit.hex_q, unit.hex_r, tq, tr);
+      if (dist > cfg.bombard_range) {
+        errors.push(
+          `Bombard: unit ${unitId} (${cfg.name}) target (${tq},${tr}) out of range ` +
+          `(dist ${dist} > bombard_range ${cfg.bombard_range}) — skipped.`
+        );
+        continue;
+      }
+    }
+
     const targetHexKey = `${tq},${tr}`;
     const targetHex = hexDataByKey.get(targetHexKey) ?? {
       has_light_vegetation: false,

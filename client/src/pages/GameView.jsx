@@ -137,7 +137,12 @@ export default function GameView() {
         {turnMsg && <span style={{ color: '#94a3b8', fontSize: 13 }}>{turnMsg}</span>}
       </div>
 
-      <HexMap gameId={gameId} isGM={false} viewAsFactionId={viewAsFactionId} />
+      <HexMap
+        gameId={gameId}
+        isGM={false}
+        viewAsFactionId={viewAsFactionId}
+        playerFactionId={faction?.id ?? null}
+      />
     </div>
   );
 }

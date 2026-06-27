@@ -175,8 +175,12 @@ export async function calculateManpower(db, gameId) {
       const d = hexDist(urban.hex_q, urban.hex_r, sett.hex_q, sett.hex_r);
       if (d < bestDist) {
         bestDist = d; bestSett = sett;
-      } else if (d === bestDist && sett.owner_faction_id === urban.owner_faction_id) {
-        bestSett = sett; // tie-break: same faction wins
+      } else if (d === bestDist) {
+        // Tie-break: same faction as the urban tile wins.
+        // Only replace if the candidate matches and the current winner doesn't.
+        const candidateMatch = sett.owner_faction_id === urban.owner_faction_id;
+        const prevMatch = bestSett?.owner_faction_id === urban.owner_faction_id;
+        if (candidateMatch && !prevMatch) bestSett = sett;
       }
     }
 

@@ -44,7 +44,7 @@ const ORDER_TYPE_LABELS = {
   repair:  'Repair',
 };
 
-export default function HexMap({ gameId, isGM = false, viewAsFactionId = null }) {
+export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -93,10 +93,14 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null })
     setSelected(hex);
     const isPlayerMode = !isGM || viewAsFactionId;
     if (isPlayerMode) {
-      // When acting as a faction, only auto-select units belonging to that faction
+      // Only auto-select units belonging to this player's faction.
+      // viewAsFactionId takes precedence (GM acting as a player).
+      // playerFactionId is the real player's own faction.
+      // Without either, fall back to first unit (shouldn't happen in practice).
+      const ownFactionId = viewAsFactionId ?? playerFactionId;
       let unit = null;
-      if (viewAsFactionId) {
-        unit = hex.units?.find(u => u.factionId === viewAsFactionId) ?? null;
+      if (ownFactionId) {
+        unit = hex.units?.find(u => u.factionId === ownFactionId) ?? null;
       } else {
         unit = hex.units?.[0] ?? null;
       }
