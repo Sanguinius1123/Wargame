@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { adminDb } from '../db.js';
 import { requireGM } from '../middleware/auth.js';
 import { executeGroundMoves } from '../utils/movement.js';
+import { runPhase4 } from '../utils/phase4.js';
 
 const router = Router();
 
@@ -59,31 +60,37 @@ router.patch('/:gameId/factions/:factionId/resources', requireGM, async (req, re
   res.json(data);
 });
 
-// POST /api/gm/:gameId/advance-turn — manually advance to next turn
+// POST /api/gm/:gameId/advance-turn — resolve current turn and advance
+// Phase 1 (Air) and Phase 2 (Naval) are stubs pending those systems.
+// Phase 3 executes ground movement + combat (combat wired in when combat.js is ready).
+// Phase 4 collects resources, advances production, calculates manpower, checks win.
 router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
-  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  const gameId = req.params.gameId;
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
 
   const currentTurn = game?.current_turn ?? 0;
   const nextTurn = currentTurn + 1;
 
-  // TODO: implement full 4-phase resolution pipeline
-  // Current: Phase 3 ground movement is executed; other phases (air, naval, production) are stubs.
+  // Phase 1: Air — stub
+  // Phase 2: Naval — stub
 
-  // --- Phase 3: Execute ground movement orders ---
-  const moveResult = await executeGroundMoves(adminDb, req.params.gameId, currentTurn);
+  // Phase 3: Ground movement
+  const moveResult = await executeGroundMoves(adminDb, gameId, currentTurn);
 
-  // Clear all movement orders for this turn after execution.
-  await adminDb
-    .from('movement_orders')
-    .delete()
-    .eq('game_id', req.params.gameId)
-    .eq('turn', currentTurn);
+  // Phase 3: Ground combat — wired in after combat.js review
+  // const combatResult = await executeGroundCombat(adminDb, gameId, currentTurn);
 
-  // Advance turn counter.
+  // Clear movement orders
+  await adminDb.from('movement_orders').delete().eq('game_id', gameId).eq('turn', currentTurn);
+
+  // Phase 4: Collect resources, advance production, calculate manpower, check win
+  const phase4Result = await runPhase4(adminDb, gameId, currentTurn);
+
+  // Advance turn counter
   const { data: updated, error } = await adminDb
     .from('games')
     .update({ current_turn: nextTurn })
-    .eq('id', req.params.gameId)
+    .eq('id', gameId)
     .select()
     .single();
 
@@ -91,11 +98,8 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
 
   res.json({
     ...updated,
-    phase3: {
-      moved: moveResult.moved,
-      skipped: moveResult.skipped,
-      errors: moveResult.errors,
-    },
+    phase3: { moved: moveResult.moved, skipped: moveResult.skipped, errors: moveResult.errors },
+    phase4: phase4Result,
   });
 });
 
