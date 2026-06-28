@@ -47,20 +47,21 @@ $$;
 -- Auto-create profile on email confirmation; assign GM role from whitelist.
 -- Also auto-adds GMs to all existing games.
 CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  IF NEW.email_confirmed_at IS NOT NULL AND OLD.email_confirmed_at IS NULL THEN
-    INSERT INTO profiles (id, username, global_role)
+  IF NEW.email_confirmed_at IS NOT NULL AND (OLD IS NULL OR OLD.email_confirmed_at IS NULL) THEN
+    INSERT INTO public.profiles (id, username, global_role)
     VALUES (
       NEW.id,
       COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1)),
-      CASE WHEN EXISTS (SELECT 1 FROM gm_whitelist WHERE email = NEW.email) THEN 'gm' ELSE 'player' END
+      CASE WHEN EXISTS (SELECT 1 FROM public.gm_whitelist WHERE email = NEW.email)
+           THEN 'gm' ELSE 'player' END
     )
     ON CONFLICT (id) DO NOTHING;
 
-    IF EXISTS (SELECT 1 FROM gm_whitelist WHERE email = NEW.email) THEN
-      INSERT INTO game_participants (game_id, profile_id, role)
-      SELECT id, NEW.id, 'gm' FROM games
+    IF EXISTS (SELECT 1 FROM public.gm_whitelist WHERE email = NEW.email) THEN
+      INSERT INTO public.game_participants (game_id, profile_id, role)
+      SELECT id, NEW.id, 'gm' FROM public.games
       ON CONFLICT DO NOTHING;
     END IF;
   END IF;
