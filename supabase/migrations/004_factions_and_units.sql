@@ -64,6 +64,30 @@ ALTER TABLE scouted_hexes
   ADD CONSTRAINT scouted_hexes_faction_id_fkey
   FOREIGN KEY (faction_id) REFERENCES factions(id) ON DELETE CASCADE;
 
+-- Deferred from 003: needs factions table
+CREATE POLICY "own faction reads scouted hexes"
+  ON scouted_hexes FOR SELECT
+  USING (
+    EXISTS (SELECT 1 FROM factions f WHERE f.id = scouted_hexes.faction_id AND f.profile_id = auth.uid())
+    OR is_gm_in_game(game_id)
+  );
+
+CREATE POLICY "players read scouted hexes"
+  ON hexes FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM factions f
+      WHERE f.game_id = hexes.game_id AND f.profile_id = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM scouted_hexes sh
+          WHERE sh.faction_id = f.id
+            AND sh.hex_q = hexes.hex_q
+            AND sh.hex_r = hexes.hex_r
+            AND sh.game_id = hexes.game_id
+        )
+    )
+  );
+
 -- Unit stacks. One row per (faction, unit_type, hex). Ground units auto-merge.
 -- Naval units and bombers use hp; ground/fighter units use quantity.
 -- Split stacks by assigning different movement orders.

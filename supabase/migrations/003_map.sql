@@ -53,33 +53,10 @@ CREATE TABLE scouted_hexes (
 
 ALTER TABLE scouted_hexes ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "own faction reads scouted hexes"
-  ON scouted_hexes FOR SELECT
-  USING (
-    EXISTS (SELECT 1 FROM factions f WHERE f.id = scouted_hexes.faction_id AND f.profile_id = auth.uid())
-    OR is_gm_in_game(game_id)
-  );
+-- "own faction reads scouted hexes" deferred to 004_factions_and_units.sql (needs factions table)
 
 CREATE POLICY "system writes scouted hexes"
   ON scouted_hexes FOR ALL
   USING (is_gm_in_game(game_id));
 
--- Player hex visibility: can see hexes they have scouted.
--- (Unit-based visibility is handled in the server; scouted_hexes is the persistent record.)
--- Added here after scouted_hexes is defined, even though faction FK isn't wired until 004.
--- The subquery will work once factions exist at runtime.
-CREATE POLICY "players read scouted hexes"
-  ON hexes FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM factions f
-      WHERE f.game_id = hexes.game_id AND f.profile_id = auth.uid()
-        AND EXISTS (
-          SELECT 1 FROM scouted_hexes sh
-          WHERE sh.faction_id = f.id
-            AND sh.hex_q = hexes.hex_q
-            AND sh.hex_r = hexes.hex_r
-            AND sh.game_id = hexes.game_id
-        )
-    )
-  );
+-- "players read scouted hexes" deferred to 004_factions_and_units.sql (needs factions table)

@@ -87,6 +87,20 @@ export default function GameView() {
         </div>
       </div>
 
+      {/* Win condition banner */}
+      {game?.winner_faction_id && (
+        <div style={{
+          background: '#052e16', border: '2px solid #16a34a', borderRadius: 8,
+          padding: '10px 18px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 18 }}>★</span>
+          <span style={{ color: '#4ade80', fontSize: 15, fontWeight: 700 }}>
+            {game.winner_faction_id === faction?.id ? 'Victory!' : 'Defeat'} — Game over.
+          </span>
+        </div>
+      )}
+
       {/* GM viewing as player banner */}
       {viewAsFactionId && faction && (
         <div style={{

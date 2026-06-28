@@ -47,14 +47,25 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all buildings grouped by hex
   const { data: buildings } = await adminDb
     .from('buildings')
-    .select('hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
+    .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
     .eq('game_id', gameId);
 
   const buildingsByHex = {};
   for (const b of buildings ?? []) {
     const k = `${b.hex_q},${b.hex_r}`;
     if (!buildingsByHex[k]) buildingsByHex[k] = [];
-    buildingsByHex[k].push({ type: b.type, current_hp: b.current_hp, max_hp: b.max_hp, owner_faction_id: b.owner_faction_id });
+    buildingsByHex[k].push({ id: b.id, type: b.type, current_hp: b.current_hp, max_hp: b.max_hp, owner_faction_id: b.owner_faction_id });
+  }
+
+  // Load resource tiles
+  const { data: resourceTiles } = await adminDb
+    .from('resource_tiles')
+    .select('id, hex_q, hex_r, tile_type, owner_faction_id')
+    .eq('game_id', gameId);
+
+  const resourceTileByHex = {};
+  for (const rt of resourceTiles ?? []) {
+    resourceTileByHex[`${rt.hex_q},${rt.hex_r}`] = { id: rt.id, tile_type: rt.tile_type, owner_faction_id: rt.owner_faction_id };
   }
 
   // GM viewing as a specific faction: apply that faction's FOW
@@ -67,6 +78,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
         ...h,
         units: unitsByHex[hexKey] ?? [],
         buildings: buildingsByHex[hexKey] ?? [],
+        resource_tile: resourceTileByHex[hexKey] ?? null,
         visibility: 'visible',
       };
     }));
@@ -87,7 +99,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   res.json(hexes.map(h => {
     const k = `${h.hex_q},${h.hex_r}`;
     if (visible.has(k)) {
-      return { ...h, units: unitsByHex[k] ?? [], buildings: buildingsByHex[k] ?? [], visibility: 'visible' };
+      return { ...h, units: unitsByHex[k] ?? [], buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
     }
     if (scouted.has(k)) {
       return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [], buildings: [] };
@@ -159,7 +171,7 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
 // path is an array of {q, r} steps for multi-hex movement; clears previous orders for this unit.
 // asFactionId: GM only — act on behalf of that faction (for testing / "view as player" mode).
 router.post('/:gameId/orders', requireAuth, async (req, res) => {
-  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path, asFactionId } = req.body;
+  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path, asFactionId, structure_type } = req.body;
   const isGM = req.user.global_role === 'gm';
 
   // Verify ownership: GM can act for any faction; players must own the unit
@@ -190,7 +202,7 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   // Build order rows — path[] for multi-step moves, single row otherwise
   const steps = Array.isArray(path) && path.length > 0
     ? path.map((step, i) => ({ unit_id, game_id: req.params.gameId, order_type: 'move', sequence: i, to_hex_q: step.q, to_hex_r: step.r, turn }))
-    : [{ unit_id, game_id: req.params.gameId, order_type, sequence: 0, to_hex_q, to_hex_r, target_hex_q, target_hex_r, turn }];
+    : [{ unit_id, game_id: req.params.gameId, order_type, sequence: 0, to_hex_q, to_hex_r, target_hex_q, target_hex_r, structure_type: structure_type ?? null, turn }];
 
   const { data, error } = await adminDb.from('movement_orders').insert(steps).select();
   if (error) return res.status(500).json({ error: error.message });

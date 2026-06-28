@@ -34,6 +34,16 @@ CREATE TABLE game_participants (
   UNIQUE (game_id, profile_id)
 );
 
+-- Helper used by RLS policies in this and later migrations.
+-- Must live after game_participants because SQL functions validate at creation time.
+CREATE OR REPLACE FUNCTION is_gm_in_game(p_game_id UUID)
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM game_participants
+    WHERE game_id = p_game_id AND profile_id = auth.uid() AND role = 'gm'
+  );
+$$;
+
 -- Auto-create profile on email confirmation; assign GM role from whitelist.
 -- Also auto-adds GMs to all existing games.
 CREATE OR REPLACE FUNCTION handle_new_user()

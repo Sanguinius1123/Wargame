@@ -30,12 +30,4 @@ VALUES
   ('wetlands',  0,         -1,         FALSE,      6,         12,        NULL,       4,              8),
   ('water',     0,         0,          FALSE,      NULL,      NULL,      3,          NULL,           NULL);
 
--- Helper used by RLS policies in later migrations.
--- Defined here because 003_map.sql and beyond depend on it.
-CREATE OR REPLACE FUNCTION is_gm_in_game(p_game_id UUID)
-RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM game_participants
-    WHERE game_id = p_game_id AND profile_id = auth.uid() AND role = 'gm'
-  );
-$$;
+-- is_gm_in_game is defined in 002_auth.sql (after game_participants is created)

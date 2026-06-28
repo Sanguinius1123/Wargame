@@ -42,6 +42,7 @@ const ORDER_TYPE_LABELS = {
   retreat: 'Retreat',
   pursue_if_retreat: 'Pursue if Retreat',
   repair:  'Repair',
+  build:   'Build',
 };
 
 export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null, faction = null }) {
@@ -57,6 +58,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   // Bombard-order state
   const [bombardMode, setBombardMode] = useState(false);
   const [bombardTarget, setBombardTarget] = useState(null);
+
+  // Build-order state (Supply truck)
+  const [buildMode, setBuildMode] = useState(false);
+  const [buildTarget, setBuildTarget] = useState(null);
+  const [buildStructureType, setBuildStructureType] = useState('');
 
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
@@ -126,19 +132,24 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setMovePath([]);
       setBombardMode(false);
       setBombardTarget(null);
+      setBuildMode(false);
+      setBuildTarget(null);
+      setBuildStructureType('');
       setCurrentOrders([]);
       fetchOrders(unit?.id ?? null);
     }
   }, [isGM, viewAsFactionId, fetchOrders]);
 
-  // Called when a hex is clicked during move or bombard mode
+  // Called when a hex is clicked during move, bombard, or build mode
   const handleModeClick = useCallback((hex) => {
     if (moveMode) {
       setMovePath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
     } else if (bombardMode) {
       setBombardTarget({ q: hex.hex_q, r: hex.hex_r });
+    } else if (buildMode) {
+      setBuildTarget({ q: hex.hex_q, r: hex.hex_r });
     }
-  }, [moveMode, bombardMode]);
+  }, [moveMode, bombardMode, buildMode]);
 
   const enterMoveMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -269,6 +280,57 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
   }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
 
+  const repairUnit = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'repair',
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
+
+  const enterBuildMode = useCallback((structureType) => {
+    if (!selectedUnit || !structureType) return;
+    setBuildStructureType(structureType);
+    setBuildTarget(null);
+    setBuildMode(true);
+    setCurrentOrders([]);
+  }, [selectedUnit]);
+
+  const cancelBuild = useCallback(() => {
+    setBuildMode(false);
+    setBuildTarget(null);
+    setBuildStructureType('');
+    fetchOrders(selectedUnit?.id ?? null);
+  }, [selectedUnit, fetchOrders]);
+
+  const confirmBuild = useCallback(async () => {
+    if (!selectedUnit || !buildStructureType || !buildTarget) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        order_type: 'build',
+        target_hex_q: buildTarget.q,
+        target_hex_r: buildTarget.r,
+        structure_type: buildStructureType,
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    setBuildMode(false);
+    setBuildTarget(null);
+    setBuildStructureType('');
+    await fetchOrders(selectedUnit.id);
+  }, [selectedUnit, buildStructureType, buildTarget, gameId, viewAsFactionId, fetchOrders]);
+
   const orderProduction = useCallback(async (unitTypeName, qty, factoryQ, factoryR) => {
     setProdMsg('');
     const headers = await authHeader();
@@ -301,6 +363,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               movePath={movePath}
               bombardMode={bombardMode}
               bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
+              buildMode={buildMode}
+              buildTargetKey={buildTarget ? `${buildTarget.q},${buildTarget.r}` : null}
               onPathClick={handleModeClick}
             />
         }
@@ -320,16 +384,23 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               movePath={movePath}
               bombardMode={bombardMode}
               bombardTarget={bombardTarget}
+              buildMode={buildMode}
+              buildTarget={buildTarget}
+              buildStructureType={buildStructureType}
               onEnterMoveMode={enterMoveMode}
               onConfirmMove={confirmMove}
               onCancelMove={cancelMove}
               onEnterBombardMode={enterBombardMode}
               onConfirmBombard={confirmBombard}
               onCancelBombard={cancelBombard}
+              onEnterBuildMode={enterBuildMode}
+              onConfirmBuild={confirmBuild}
+              onCancelBuild={cancelBuild}
               onClearOrders={clearOrders}
               onFortify={fortifyUnit}
               onRetreat={retreatUnit}
               onPursue={pursueUnit}
+              onRepair={repairUnit}
               currentOrders={currentOrders}
               playerFactionId={viewAsFactionId ?? playerFactionId}
               faction={faction}
@@ -363,16 +434,23 @@ function HexDetail({
   movePath,
   bombardMode,
   bombardTarget,
+  buildMode,
+  buildTarget,
+  buildStructureType,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
   onEnterBombardMode,
   onConfirmBombard,
   onCancelBombard,
+  onEnterBuildMode,
+  onConfirmBuild,
+  onCancelBuild,
   onClearOrders,
   onFortify,
   onRetreat,
   onPursue,
+  onRepair,
   currentOrders,
   playerFactionId = null,
   faction = null,
@@ -398,6 +476,12 @@ function HexDetail({
   const factionIds = [...new Set((hex.units ?? []).map(u => u.factionId))];
   const isContested = factionIds.length >= 2;
 
+  // Repair eligibility: does this hex have the right facility for the selected unit?
+  const hasHarbor = hex.buildings?.some(b => b.type === 'harbor' && b.current_hp >= 1);
+  const hasAirbase = hex.buildings?.some(b => b.type === 'airbase' && b.current_hp >= 1);
+  const unitTags = selectedUnit?.tags ?? [];
+  const hasRepairFacility = (unitTags.includes('naval') && hasHarbor) || (unitTags.includes('air') && hasAirbase);
+
   return (
     <div>
       <p style={{ color: '#94a3b8', fontSize: 11, marginBottom: 8 }}>
@@ -420,7 +504,7 @@ function HexDetail({
       {vis === 'visible' && (
         <>
           {/* Hex attributes */}
-          {(hex.has_settlement || hex.has_urban || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.has_road || hex.has_canal) && (
+          {(hex.has_settlement || hex.has_urban || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.has_road || hex.has_canal || hex.resource_tile) && (
             <div style={{ marginBottom: 10 }}>
               <p style={STAT_LABEL}>Attributes</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -430,6 +514,7 @@ function HexDetail({
                 {hex.has_light_vegetation && !hex.has_heavy_vegetation && <Tag label="Light Forest" color="#86efac" />}
                 {hex.has_road && <Tag label="Road" color="#94a3b8" />}
                 {hex.has_canal && <Tag label="Canal" color="#38bdf8" />}
+                {hex.resource_tile && <Tag label={`Resource (${hex.resource_tile.tile_type})`} color="#f59e0b" />}
               </div>
             </div>
           )}
@@ -496,24 +581,35 @@ function HexDetail({
               movePath={movePath}
               bombardMode={bombardMode}
               bombardTarget={bombardTarget}
+              buildMode={buildMode}
+              buildTarget={buildTarget}
+              buildStructureType={buildStructureType}
               onEnterMoveMode={onEnterMoveMode}
               onConfirmMove={onConfirmMove}
               onCancelMove={onCancelMove}
               onEnterBombardMode={onEnterBombardMode}
               onConfirmBombard={onConfirmBombard}
               onCancelBombard={onCancelBombard}
+              onEnterBuildMode={onEnterBuildMode}
+              onConfirmBuild={onConfirmBuild}
+              onCancelBuild={onCancelBuild}
               onClearOrders={onClearOrders}
               onFortify={onFortify}
               onRetreat={onRetreat}
               onPursue={onPursue}
+              onRepair={onRepair}
               currentOrders={currentOrders}
               isContested={isContested}
+              hasRepairFacility={hasRepairFacility}
             />
           )}
 
-          {/* GM hex editor */}
+          {/* GM hex editor (terrain/attributes) + building editor */}
           {isGM && (
-            <GMHexEditor hex={hex} gameId={gameId} onRefresh={onRefresh} />
+            <>
+              <GMHexEditor hex={hex} gameId={gameId} onRefresh={onRefresh} />
+              <GMBuildingEditor hex={hex} gameId={gameId} onRefresh={onRefresh} />
+            </>
           )}
         </>
       )}
@@ -657,28 +753,48 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
   );
 }
 
+const BUILD_STRUCTURES = [
+  { value: 'fortification', label: 'Fortification (+1 def, 4 HP)' },
+  { value: 'airstrip',      label: 'Airstrip (4 HP)' },
+  { value: 'bridge',        label: 'Bridge (4 HP)' },
+  { value: 'road',          label: 'Road segment' },
+  { value: 'canal',         label: 'Canal (10 manpower)' },
+];
+
 function OrderPanel({
   unit,
   moveMode,
   movePath,
   bombardMode,
   bombardTarget,
+  buildMode,
+  buildTarget,
+  buildStructureType,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
   onEnterBombardMode,
   onConfirmBombard,
   onCancelBombard,
+  onEnterBuildMode,
+  onConfirmBuild,
+  onCancelBuild,
   onClearOrders,
   onFortify,
   onRetreat,
   onPursue,
+  onRepair,
   currentOrders,
   isContested,
+  hasRepairFacility = false,
 }) {
+  const [pendingBuildType, setPendingBuildType] = useState('');
+
   const hasPath = movePath.length >= 2;
   const moveSteps = currentOrders.filter(o => o.order_type === 'move').length;
   const canBombard = unit.bombard_to_hit != null || unit.bombard_range != null;
+  const isSupply = unit.tags?.includes('supply');
+  const hasHp = unit.hp != null;
 
   // Build a summary list of queued order types (deduplicated for non-move orders)
   const orderSummary = [];
@@ -692,7 +808,7 @@ function OrderPanel({
     orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
   }
 
-  const inAnyMode = moveMode || bombardMode;
+  const inAnyMode = moveMode || bombardMode || buildMode;
 
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
@@ -707,7 +823,7 @@ function OrderPanel({
           }} />
           <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>{unit.type}</span>
           <span style={{ color: '#94a3b8', fontSize: 12 }}>
-            {unit.hp != null ? `${unit.hp} HP` : `×${unit.quantity}`}
+            {hasHp ? `${unit.hp} HP` : `×${unit.quantity}`}
           </span>
         </div>
         {unit.standing_order && <Tag label={unit.standing_order} color="#6366f1" />}
@@ -767,6 +883,26 @@ function OrderPanel({
         </div>
       )}
 
+      {/* Build mode (Supply truck) */}
+      {buildMode && (
+        <div>
+          <p style={{ color: '#34d399', fontSize: 11, marginBottom: 8 }}>
+            Building: <strong style={{ color: '#e2e8f0' }}>{buildStructureType}</strong>.
+            Click target hex on the map.{buildTarget ? ` → (${buildTarget.q}, ${buildTarget.r})` : ''}
+          </p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              style={{ ...BTN.base, background: '#065f46', color: '#6ee7b7', opacity: buildTarget ? 1 : 0.5 }}
+              disabled={!buildTarget}
+              onClick={onConfirmBuild}
+            >
+              Confirm Build
+            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelBuild}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Normal buttons (not in any mode) */}
       {!inAnyMode && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -816,6 +952,43 @@ function OrderPanel({
                   Bombard
                 </button>
               )}
+
+              {/* Supply truck: Build order */}
+              {isSupply && (
+                <div style={{ width: '100%', marginTop: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <select
+                      style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 3, padding: '4px 6px', color: '#e2e8f0', fontSize: 12, flex: 1 }}
+                      value={pendingBuildType}
+                      onChange={e => setPendingBuildType(e.target.value)}
+                    >
+                      <option value="">— Build structure —</option>
+                      {BUILD_STRUCTURES.map(s => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      style={{ ...BTN.base, background: pendingBuildType ? '#065f46' : '#1e293b', color: pendingBuildType ? '#6ee7b7' : '#475569' }}
+                      disabled={!pendingBuildType}
+                      onClick={() => onEnterBuildMode(pendingBuildType)}
+                      title="Supply truck constructs the selected structure. Truck is consumed (except road/canal). Completes at end of Phase 4."
+                    >
+                      Build…
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Repair order (naval at Harbor, air at Airbase) */}
+              {hasHp && hasRepairFacility && (
+                <button
+                  style={{ ...BTN.base, background: '#1e4d2b', color: '#86efac' }}
+                  onClick={onRepair}
+                  title="Repair: Spend resources to restore 1 HP. Requires a Harbor (naval) or Airbase (air) in this hex."
+                >
+                  Repair
+                </button>
+              )}
             </>
           )}
 
@@ -828,6 +1001,173 @@ function OrderPanel({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+const BUILDING_TYPES = ['factory', 'airbase', 'harbor', 'airstrip', 'bridge', 'fortification'];
+const BUILDING_MAX_HP_CLIENT = { factory: 20, airbase: 10, harbor: 10, airstrip: 4, bridge: 4, fortification: 4 };
+
+function GMBuildingEditor({ hex, gameId, onRefresh }) {
+  const [factions, setFactions] = useState([]);
+  const [newType, setNewType] = useState('');
+  const [newOwner, setNewOwner] = useState('');
+  const [newHp, setNewHp] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    authHeader().then(h =>
+      fetch(`${SERVER}/api/games/${gameId}/factions`, { headers: h })
+        .then(r => r.ok ? r.json() : [])
+        .then(d => setFactions(Array.isArray(d) ? d : (d.factions ?? [])))
+    );
+  }, [gameId]);
+
+  async function addBuilding() {
+    if (!newType) return;
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/gm/${gameId}/buildings`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hex_q: hex.hex_q, hex_r: hex.hex_r,
+        type: newType,
+        owner_faction_id: newOwner || null,
+        current_hp: newHp !== '' ? Number(newHp) : undefined,
+      }),
+    });
+    if (r.ok) { setMsg('Added.'); setNewType(''); setNewOwner(''); setNewHp(''); onRefresh(); }
+    else { const d = await r.json(); setMsg(d.error ?? 'Error'); }
+  }
+
+  async function removeBuilding(id) {
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/gm/${gameId}/buildings/${id}`, { method: 'DELETE', headers });
+    onRefresh();
+  }
+
+  async function setHp(id, hp) {
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/gm/${gameId}/buildings/${id}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_hp: Number(hp) }),
+    });
+    onRefresh();
+  }
+
+  async function setOwner(id, ownerId) {
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/gm/${gameId}/buildings/${id}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner_faction_id: ownerId || null }),
+    });
+    onRefresh();
+  }
+
+  const iS = { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 3, padding: '3px 5px', color: '#e2e8f0', fontSize: 11 };
+
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid #1e293b', paddingTop: 10 }}>
+      <p style={{ color: '#64748b', fontSize: 11, marginBottom: 8 }}>GM — Buildings</p>
+
+      {/* Existing buildings */}
+      {(hex.buildings ?? []).map(b => {
+        const maxHp = BUILDING_MAX_HP_CLIENT[b.type] ?? b.max_hp;
+        return (
+          <div key={b.id} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 5, flexWrap: 'wrap' }}>
+            <span style={{ color: '#e2e8f0', fontSize: 12, minWidth: 80 }}>{b.type}</span>
+            <input
+              type="number" min={0} max={maxHp}
+              defaultValue={b.current_hp}
+              onBlur={e => setHp(b.id, e.target.value)}
+              style={{ ...iS, width: 44 }}
+              title="Current HP"
+            />
+            <span style={{ color: '#64748b', fontSize: 11 }}>/{maxHp}</span>
+            <select
+              defaultValue={b.owner_faction_id ?? ''}
+              onChange={e => setOwner(b.id, e.target.value)}
+              style={{ ...iS, flex: 1, minWidth: 80 }}
+            >
+              <option value="">— no owner —</option>
+              {factions.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            <button
+              onClick={() => removeBuilding(b.id)}
+              style={{ border: 'none', borderRadius: 3, background: '#7f1d1d', color: '#fca5a5', fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
+            >✕</button>
+          </div>
+        );
+      })}
+
+      {/* Add new building */}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}>Add building</div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <select style={{ ...iS, flex: 1 }} value={newType} onChange={e => { setNewType(e.target.value); setNewHp(''); }}>
+            <option value="">— type —</option>
+            {BUILDING_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select style={{ ...iS, flex: 1 }} value={newOwner} onChange={e => setNewOwner(e.target.value)}>
+            <option value="">— owner —</option>
+            {factions.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          {newType && (
+            <input
+              type="number" min={0} max={BUILDING_MAX_HP_CLIENT[newType] ?? 20}
+              placeholder={`HP (default max ${BUILDING_MAX_HP_CLIENT[newType] ?? '?'})`}
+              style={{ ...iS, width: 70 }}
+              value={newHp}
+              onChange={e => setNewHp(e.target.value)}
+            />
+          )}
+          <button
+            onClick={addBuilding}
+            disabled={!newType}
+            style={{ border: 'none', borderRadius: 3, background: newType ? '#1d4ed8' : '#1e293b', color: newType ? '#e2e8f0' : '#475569', fontSize: 11, padding: '3px 8px', cursor: newType ? 'pointer' : 'default' }}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Resource tile management */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}>Resource tile</div>
+        {hex.resource_tile
+          ? (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ color: '#f59e0b', fontSize: 12 }}>{hex.resource_tile.tile_type}</span>
+              <button
+                onClick={async () => {
+                  const headers = await authHeader();
+                  await fetch(`${SERVER}/api/gm/${gameId}/resource-tiles/${hex.resource_tile.id}`, { method: 'DELETE', headers });
+                  onRefresh();
+                }}
+                style={{ border: 'none', borderRadius: 3, background: '#7f1d1d', color: '#fca5a5', fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
+              >Remove</button>
+            </div>
+          )
+          : (
+            <button
+              onClick={async () => {
+                const headers = await authHeader();
+                await fetch(`${SERVER}/api/gm/${gameId}/resource-tiles`, {
+                  method: 'POST',
+                  headers: { ...headers, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ hex_q: hex.hex_q, hex_r: hex.hex_r }),
+                });
+                onRefresh();
+              }}
+              style={{ border: 'none', borderRadius: 3, background: '#78350f', color: '#fde68a', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+            >Place Resource Tile</button>
+          )
+        }
+      </div>
+
+      {msg && <p style={{ color: '#94a3b8', fontSize: 11, marginTop: 6 }}>{msg}</p>}
     </div>
   );
 }

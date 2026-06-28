@@ -126,6 +126,78 @@ router.patch('/:gameId/settings', requireGM, async (req, res) => {
   res.json(data);
 });
 
+// ─── Building management ────────────────────────────────────────────────────
+
+const BUILDING_MAX_HP = {
+  factory: 20, airbase: 10, harbor: 10,
+  airstrip: 4, bridge: 4, fortification: 4,
+};
+
+// POST /api/gm/:gameId/buildings — place a building (full HP by default = operational)
+router.post('/:gameId/buildings', requireGM, async (req, res) => {
+  const { hex_q, hex_r, type, owner_faction_id, current_hp } = req.body;
+  if (!type || hex_q == null || hex_r == null) {
+    return res.status(400).json({ error: 'type, hex_q, hex_r required' });
+  }
+  const max_hp = BUILDING_MAX_HP[type];
+  if (!max_hp) return res.status(400).json({ error: `Unknown building type: ${type}` });
+
+  const hp = current_hp != null ? Math.min(Number(current_hp), max_hp) : max_hp;
+  const { data, error } = await adminDb.from('buildings').insert({
+    game_id: req.params.gameId,
+    hex_q: Number(hex_q), hex_r: Number(hex_r),
+    type, max_hp, current_hp: hp,
+    owner_faction_id: owner_faction_id || null,
+  }).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data);
+});
+
+// PATCH /api/gm/:gameId/buildings/:id — update HP or owner
+router.patch('/:gameId/buildings/:id', requireGM, async (req, res) => {
+  const updates = {};
+  if (req.body.current_hp !== undefined) updates.current_hp = Number(req.body.current_hp);
+  if (req.body.owner_faction_id !== undefined) updates.owner_faction_id = req.body.owner_faction_id || null;
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await adminDb.from('buildings').update(updates)
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// DELETE /api/gm/:gameId/buildings/:id
+router.delete('/:gameId/buildings/:id', requireGM, async (req, res) => {
+  await adminDb.from('buildings').delete().eq('id', req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Resource tile management ────────────────────────────────────────────────
+
+// POST /api/gm/:gameId/resource-tiles — place or update resource tile on a hex
+router.post('/:gameId/resource-tiles', requireGM, async (req, res) => {
+  const { hex_q, hex_r, tile_type = 'resource', owner_faction_id } = req.body;
+  if (hex_q == null || hex_r == null) return res.status(400).json({ error: 'hex_q, hex_r required' });
+
+  const { data, error } = await adminDb.from('resource_tiles').upsert({
+    game_id: req.params.gameId,
+    hex_q: Number(hex_q), hex_r: Number(hex_r),
+    tile_type, owner_faction_id: owner_faction_id || null,
+  }, { onConflict: 'game_id,hex_q,hex_r' }).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// DELETE /api/gm/:gameId/resource-tiles/:id
+router.delete('/:gameId/resource-tiles/:id', requireGM, async (req, res) => {
+  await adminDb.from('resource_tiles').delete().eq('id', req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Combat log ──────────────────────────────────────────────────────────────
+
 // GET /api/gm/:gameId/combat-log?turn=N
 // Returns combat_log entries for the given turn (defaults to last completed turn).
 router.get('/:gameId/combat-log', requireGM, async (req, res) => {

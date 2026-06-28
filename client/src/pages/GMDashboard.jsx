@@ -125,6 +125,23 @@ export default function GMDashboard() {
         </label>
       </div>
 
+      {/* Win condition banner */}
+      {game?.winner_faction_id && (() => {
+        const wf = factions.find(f => f.id === game.winner_faction_id);
+        return (
+          <div style={{
+            background: '#052e16', border: '2px solid #16a34a', borderRadius: 8,
+            padding: '10px 18px', marginBottom: 16,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ fontSize: 18 }}>★</span>
+            <span style={{ color: '#4ade80', fontSize: 15, fontWeight: 700 }}>
+              {wf ? wf.name : 'A faction'} has won the game!
+            </span>
+          </div>
+        );
+      })()}
+
       {msg && <p style={{ color: '#fbbf24', marginBottom: 12, fontSize: 13 }}>{msg}</p>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>

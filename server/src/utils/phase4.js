@@ -329,14 +329,154 @@ export async function checkWinCondition(db, gameId) {
 
   const threshold = 2 / 3;
   for (const [fid, count] of Object.entries(byfaction)) {
-    if (count / total >= threshold) return { winner: fid };
+    if (count / total >= threshold) {
+      await db.from('games').update({ winner_faction_id: fid }).eq('id', gameId);
+      return { winner: fid };
+    }
   }
 
   return { winner: null };
 }
 
 // ---------------------------------------------------------------------------
-// 5. resetTurnReady
+// 5. processRepairOrders
+// Naval at Harbor, air at Airbase — repair 1 HP, costs ceil(mat/4) + ceil(man/4).
+// ---------------------------------------------------------------------------
+export async function processRepairOrders(db, gameId, currentTurn) {
+  const { data: repairOrders } = await db
+    .from('movement_orders')
+    .select('unit_id')
+    .eq('game_id', gameId)
+    .eq('turn', currentTurn)
+    .eq('order_type', 'repair');
+
+  if (!repairOrders?.length) return { repaired: 0 };
+
+  let repaired = 0;
+
+  for (const order of repairOrders) {
+    const { data: unit } = await db
+      .from('units')
+      .select('id, hp, hex_q, hex_r, faction_id, unit_type_config(hp, mat_cost, man_cost, tags)')
+      .eq('id', order.unit_id)
+      .single();
+
+    if (!unit || unit.hp == null) continue;
+
+    const maxHp = unit.unit_type_config?.hp;
+    if (!maxHp || unit.hp >= maxHp) continue;
+
+    const tags = unit.unit_type_config?.tags ?? [];
+    const facilityType = tags.includes('naval') ? 'harbor' : tags.includes('air') ? 'airbase' : null;
+    if (!facilityType) continue;
+
+    const { data: facility } = await db
+      .from('buildings')
+      .select('id')
+      .eq('game_id', gameId)
+      .eq('hex_q', unit.hex_q).eq('hex_r', unit.hex_r)
+      .eq('type', facilityType)
+      .gte('current_hp', 1)
+      .maybeSingle();
+
+    if (!facility) continue;
+
+    const matCost = Math.ceil((unit.unit_type_config?.mat_cost ?? 2) / 4);
+    const manCost = Math.ceil((unit.unit_type_config?.man_cost ?? 1) / 4);
+
+    const { data: faction } = await db
+      .from('factions').select('id, materials, manpower').eq('id', unit.faction_id).single();
+
+    if (!faction || faction.materials < matCost || faction.manpower < manCost) continue;
+
+    await Promise.all([
+      db.from('factions').update({ materials: faction.materials - matCost, manpower: faction.manpower - manCost }).eq('id', faction.id),
+      db.from('units').update({ hp: unit.hp + 1 }).eq('id', unit.id),
+    ]);
+    repaired++;
+  }
+
+  return { repaired };
+}
+
+// ---------------------------------------------------------------------------
+// 6. processBuildOrders
+// Supply trucks build structures. One-turn build → structure at full HP,
+// truck consumed (except roads and canals).
+// ---------------------------------------------------------------------------
+const STRUCTURE_MAX_HP = { fortification: 4, bridge: 4, airstrip: 4 };
+
+export async function processBuildOrders(db, gameId, currentTurn) {
+  const { data: buildOrders } = await db
+    .from('movement_orders')
+    .select('unit_id, target_hex_q, target_hex_r, structure_type')
+    .eq('game_id', gameId)
+    .eq('turn', currentTurn)
+    .eq('order_type', 'build');
+
+  if (!buildOrders?.length) return { built: 0 };
+
+  let built = 0;
+
+  for (const order of buildOrders) {
+    const { structure_type, unit_id, target_hex_q, target_hex_r } = order;
+    if (!structure_type) continue;
+
+    const { data: unit } = await db
+      .from('units')
+      .select('id, hex_q, hex_r, faction_id, quantity')
+      .eq('id', unit_id).single();
+    if (!unit) continue;
+
+    const tq = target_hex_q ?? unit.hex_q;
+    const tr = target_hex_r ?? unit.hex_r;
+
+    if (structure_type === 'road') {
+      await db.from('hexes').update({ has_road: true })
+        .eq('game_id', gameId).eq('hex_q', tq).eq('hex_r', tr);
+      built++;
+      continue;
+    }
+
+    if (structure_type === 'canal') {
+      // Canal: deduct 10 manpower, set has_canal, truck NOT consumed
+      const { data: faction } = await db
+        .from('factions').select('id, manpower').eq('id', unit.faction_id).single();
+      if (!faction || faction.manpower < 10) continue;
+      await db.from('factions').update({ manpower: faction.manpower - 10 }).eq('id', faction.id);
+      await db.from('hexes').update({ has_canal: true })
+        .eq('game_id', gameId).eq('hex_q', tq).eq('hex_r', tr);
+      built++;
+      continue;
+    }
+
+    const maxHp = STRUCTURE_MAX_HP[structure_type];
+    if (!maxHp) continue;
+
+    // Create or replace existing building at full HP; consume truck
+    const { error } = await db.from('buildings').upsert({
+      game_id: gameId, hex_q: tq, hex_r: tr,
+      type: structure_type, current_hp: maxHp, max_hp: maxHp,
+      owner_faction_id: unit.faction_id,
+    }, { onConflict: 'game_id,hex_q,hex_r,type' });
+
+    if (error) continue;
+
+    // Consume supply truck
+    const newQty = unit.quantity - 1;
+    if (newQty <= 0) {
+      await db.from('units').delete().eq('id', unit.id);
+    } else {
+      await db.from('units').update({ quantity: newQty }).eq('id', unit.id);
+    }
+    built++;
+  }
+
+  return { built };
+}
+
+// ---------------------------------------------------------------------------
+// 7. resetTurnReady
 // Clears turn_ready for all players so the next ordering phase can begin.
 // ---------------------------------------------------------------------------
 export async function resetTurnReady(db, gameId) {
@@ -350,13 +490,15 @@ export async function resetTurnReady(db, gameId) {
 // runPhase4 — convenience wrapper for advance-turn
 // ---------------------------------------------------------------------------
 export async function runPhase4(db, gameId, currentTurn) {
-  // collectMaterials and advanceProduction are independent — run in parallel.
-  // calculateManpower must finish before checkWinCondition because it writes
-  // owner_faction_id on settlement hexes that checkWinCondition reads.
-  const [materials, production] = await Promise.all([
+  // Repair and build orders process first; production + materials can run in parallel with those.
+  const [repairResult, buildResult, materials, production] = await Promise.all([
+    processRepairOrders(db, gameId, currentTurn),
+    processBuildOrders(db, gameId, currentTurn),
     collectMaterials(db, gameId),
     advanceProduction(db, gameId, currentTurn),
   ]);
+
+  // calculateManpower must finish before checkWinCondition (writes settlement owners).
   const manpower = await calculateManpower(db, gameId);
   const winResult = await checkWinCondition(db, gameId);
 
@@ -365,6 +507,8 @@ export async function runPhase4(db, gameId, currentTurn) {
   return {
     materials_collected: materials.collected,
     units_placed: production.placed,
+    units_repaired: repairResult.repaired,
+    structures_built: buildResult.built,
     manpower: manpower.assigned,
     winner: winResult.winner,
   };
