@@ -19,8 +19,8 @@ router.post('/register', async (req, res) => {
     options: { data: { username } },
   });
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ message: 'Check your email to confirm your account.' });
+  if (error) return res.status(400).json({ error: error.message ?? error.name ?? 'Registration failed' });
+  res.json({ message: 'Registered! Check your email to confirm your account, or sign in now if confirmation is disabled.' });
 });
 
 export default router;

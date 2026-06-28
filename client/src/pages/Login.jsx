@@ -48,7 +48,7 @@ export default function Login() {
     });
     const data = await r.json();
     setLoading(false);
-    if (!r.ok) return setErr(data.error);
+    if (!r.ok) return setErr(typeof data.error === 'string' ? data.error : JSON.stringify(data.error) || 'Registration failed');
     setMsg('Check your email to confirm your account.');
   }
 
