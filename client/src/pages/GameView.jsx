@@ -30,35 +30,51 @@ export default function GameView() {
   const [faction, setFaction] = useState(null);
   const [turnReady, setTurnReady] = useState(false);
   const [turnMsg, setTurnMsg] = useState('');
+  const [mapRefreshKey, setMapRefreshKey] = useState(0);
 
   async function authHeaders() {
     const { data: { session } } = await supabase.auth.getSession();
     return { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' };
   }
 
+  async function loadGameState() {
+    const headers = await authHeaders();
+    const [gr, fr] = await Promise.all([
+      fetch(`${SERVER}/api/games`, { headers }),
+      fetch(`${SERVER}/api/games/${gameId}/factions`, { headers }),
+    ]);
+    if (gr.ok) {
+      const games = await gr.json();
+      setGame(games.find(g => g.id === gameId));
+    }
+    if (fr.ok) {
+      const factions = await fr.json();
+      if (viewAsFactionId) {
+        setFaction(factions.find(f => f.id === viewAsFactionId));
+      } else {
+        setFaction(factions.find(f => f.profiles?.id === profile?.id || f.profile_id === profile?.id));
+      }
+    }
+  }
+
   useEffect(() => {
-    (async () => {
-      const headers = await authHeaders();
+    loadGameState();
 
-      const [gr, fr] = await Promise.all([
-        fetch(`${SERVER}/api/games`, { headers }),
-        fetch(`${SERVER}/api/games/${gameId}/factions`, { headers }),
-      ]);
-
-      if (gr.ok) {
-        const games = await gr.json();
-        setGame(games.find(g => g.id === gameId));
-      }
-      if (fr.ok) {
-        const factions = await fr.json();
-        // If GM viewing as a faction, show that faction's resources
-        if (viewAsFactionId) {
-          setFaction(factions.find(f => f.id === viewAsFactionId));
-        } else {
-          setFaction(factions.find(f => f.profiles?.id === profile?.id || f.profile_id === profile?.id));
+    // Reload everything when the turn advances (another player or GM triggered it)
+    const channel = supabase
+      .channel(`game-turn-watch-${gameId}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` },
+        () => {
+          loadGameState();
+          setMapRefreshKey(k => k + 1);
+          setTurnReady(false);
+          setTurnMsg('');
         }
-      }
-    })();
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
   }, [gameId, profile]);
 
   async function finishTurn() {
@@ -157,6 +173,7 @@ export default function GameView() {
         viewAsFactionId={viewAsFactionId}
         playerFactionId={faction?.id ?? null}
         faction={faction}
+        refreshKey={mapRefreshKey}
       />
     </div>
   );

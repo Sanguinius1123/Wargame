@@ -33,14 +33,7 @@ function roll2d6() {
   return Math.ceil(Math.random() * 6) + Math.ceil(Math.random() * 6);
 }
 
-// ---------------------------------------------------------------------------
-// hexDist — axial hex distance (same as Chebyshev in cube coords)
-// ---------------------------------------------------------------------------
-function hexDist(q1, r1, q2, r2) {
-  const dq = q2 - q1;
-  const dr = r2 - r1;
-  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
-}
+import { hexDist } from './hexGeometry.js';
 
 // ---------------------------------------------------------------------------
 // rollAttackAndSave

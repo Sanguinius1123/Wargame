@@ -2,19 +2,9 @@
 // Returns { visible: Set<"q,r">, scouted: Set<"q,r"> }
 // "visible" = currently in LOS. "scouted" = ever seen (from DB), excluding currently visible.
 
-const NEIGHBORS = [[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
+import { hexesInRange, offsetToAxial, axialToOffset, cubeRound } from './hexGeometry.js';
 
 function key(q, r) { return `${q},${r}`; }
-
-function hexesInRange(q, r, range) {
-  const result = new Set();
-  for (let dq = -range; dq <= range; dq++) {
-    for (let dr = -range; dr <= range; dr++) {
-      if (Math.abs(dq + dr) <= range) result.add(key(q + dq, r + dr));
-    }
-  }
-  return result;
-}
 
 export async function computeVisibility(db, factionId, gameId) {
   const [unitsRes, terrainRes, scoutedRes] = await Promise.all([
@@ -58,29 +48,22 @@ export async function computeVisibility(db, factionId, gameId) {
   return { visible, scouted };
 }
 
-// Cube-coordinate rounding for hex grids.
-// Rounds (q, r) floats to the nearest valid hex by rounding all three cube
-// coordinates and then correcting the one with the largest rounding error.
-function cubeRound(fq, fr) {
-  const fs = -fq - fr;
-  let rq = Math.round(fq), rr = Math.round(fr), rs = Math.round(fs);
-  const dq = Math.abs(rq - fq), dr = Math.abs(rr - fr), ds = Math.abs(rs - fs);
-  if (dq > dr && dq > ds) rq = -rr - rs;
-  else if (dr > ds) rr = -rq - rs;
-  return { q: rq, r: rr };
-}
-
-// LOS check: block if any intermediate hex blocks LOS.
-// Uses cube-coordinate rounding for correct hex grid interpolation.
+// LOS check: interpolate in axial space so intermediate hexes map correctly
+// to offset coords (offset interpolation produces wrong intermediate hexes).
 function isBlocked(fromQ, fromR, toKey, blockingSet) {
   const [toQ, toR] = toKey.split(',').map(Number);
   if (fromQ === toQ && fromR === toR) return false;
 
-  const steps = Math.max(Math.abs(toQ - fromQ), Math.abs(toR - fromR), Math.abs((toQ + toR) - (fromQ + fromR)));
+  const fa = offsetToAxial(fromQ, fromR);
+  const ta = offsetToAxial(toQ, toR);
+  const dq = ta.q - fa.q, dr = ta.r - fa.r;
+  const steps = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
+
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    const { q: iq, r: ir } = cubeRound(fromQ + (toQ - fromQ) * t, fromR + (toR - fromR) * t);
-    if (blockingSet.has(key(iq, ir))) return true;
+    const { q: iq, r: ir } = cubeRound(fa.q + dq * t, fa.r + dr * t);
+    const { q: oq, r: or_ } = axialToOffset(iq, ir);
+    if (blockingSet.has(key(oq, or_))) return true;
   }
   return false;
 }

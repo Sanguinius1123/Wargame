@@ -34,11 +34,7 @@
 // Helpers
 // ---------------------------------------------------------------------------
 
-const NEIGHBORS = [
-  [1, 0], [-1, 0],
-  [0, 1], [0, -1],
-  [1, -1], [-1, 1],
-];
+import { offsetNeighbors } from './hexGeometry.js';
 
 function hexKey(q, r) {
   return `${q},${r}`;
@@ -294,9 +290,7 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
     //   - it has no enemy units currently (enemy = other faction),
     //   - it is passable for this unit type.
     const candidates = [];
-    for (const [dq, dr] of NEIGHBORS) {
-      const nq = unit.hex_q + dq;
-      const nr = unit.hex_r + dr;
+    for (const { q: nq, r: nr } of offsetNeighbors(unit.hex_q, unit.hex_r)) {
       const nk = hexKey(nq, nr);
 
       const destHex = hexesByKey.get(nk);

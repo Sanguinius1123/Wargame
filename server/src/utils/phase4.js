@@ -9,15 +9,7 @@
 //   5. resetTurnReady     — clear turn_ready so next turn can begin
 // =============================================================
 
-// ---------------------------------------------------------------------------
-// Hex distance (axial coordinates)
-// ---------------------------------------------------------------------------
-function hexDist(q1, r1, q2, r2) {
-  const dq = q2 - q1, dr = r2 - r1;
-  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
-}
-
-const AXIAL_NEIGHBORS = [[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
+import { hexDist, offsetNeighbors } from './hexGeometry.js';
 
 // ---------------------------------------------------------------------------
 // 1. collectMaterials
@@ -92,7 +84,7 @@ export async function advanceProduction(db, gameId, currentTurn) {
     // Try factory hex first, then adjacent hexes
     const candidates = [
       { q: item.factory_hex_q, r: item.factory_hex_r },
-      ...AXIAL_NEIGHBORS.map(([dq, dr]) => ({ q: item.factory_hex_q + dq, r: item.factory_hex_r + dr })),
+      ...offsetNeighbors(item.factory_hex_q, item.factory_hex_r),
     ];
 
     let spawned = false;
@@ -276,15 +268,15 @@ export async function calculateManpower(db, gameId) {
 
     while (queue.length) {
       const { q, r } = queue.shift();
-      for (const [dq, dr] of AXIAL_NEIGHBORS) {
-        const nk = `${q + dq},${r + dr}`;
+      for (const { q: nq, r: nr } of offsetNeighbors(q, r)) {
+        const nk = `${nq},${nr}`;
         if (visited.has(nk)) continue;
         visited.add(nk);
         const urban = hexIndex.get(nk);
         // Must be urban, owned by this faction, and producing (hp ≥ 3)
         if (urban && urban.owner_faction_id === factionId && urban.urban_hp >= 3) {
           count++;
-          queue.push({ q: q + dq, r: r + dr });
+          queue.push({ q: nq, r: nr });
         }
       }
     }

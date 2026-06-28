@@ -45,7 +45,7 @@ const ORDER_TYPE_LABELS = {
   build:   'Build',
 };
 
-export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null, faction = null }) {
+export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null, faction = null, refreshKey = 0, onHexSelect = null }) {
   const [hexes, setHexes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -80,7 +80,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     const r = await fetch(url, { headers });
     if (r.ok) setHexes(await r.json());
     setLoading(false);
-  }, [gameId, viewAsFactionId]);
+  }, [gameId, viewAsFactionId, refreshKey]);
 
   const loadProduction = useCallback(async () => {
     if (isGM) return; // Skip for GM and viewAs mode (endpoint uses caller's profile_id)
@@ -95,6 +95,13 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadProduction(); }, [loadProduction]);
+
+  // Keep detail panel in sync when hexes refresh (e.g. after GM +/- unit)
+  useEffect(() => {
+    if (!selected) return;
+    const updated = hexes.find(h => h.hex_q === selected.hex_q && h.hex_r === selected.hex_r);
+    if (updated) setSelected(updated);
+  }, [hexes]);
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
 
@@ -114,6 +121,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   // Called when player clicks a hex in normal mode
   const handleSelect = useCallback((hex) => {
     setSelected(hex);
+    if (onHexSelect) onHexSelect(hex);
     const isPlayerMode = !isGM || viewAsFactionId;
     if (isPlayerMode) {
       // Only auto-select units belonging to this player's faction.
@@ -138,7 +146,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setCurrentOrders([]);
       fetchOrders(unit?.id ?? null);
     }
-  }, [isGM, viewAsFactionId, fetchOrders]);
+  }, [isGM, viewAsFactionId, fetchOrders, onHexSelect]);
 
   // Called when a hex is clicked during move, bombard, or build mode
   const handleModeClick = useCallback((hex) => {

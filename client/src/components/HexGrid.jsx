@@ -16,17 +16,19 @@ const VISIBILITY_OVERLAY = {
 };
 
 
+// Flat-top hex layout, even-q offset coordinates.
+// q=col, r=row; odd columns shift down by half a hex height.
 function hexToPixel(q, r, size) {
   return {
-    x: size * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r),
-    y: size * (3 / 2 * r),
+    x: size * (3 / 2) * q,
+    y: size * Math.sqrt(3) * (r + (q % 2) * 0.5),
   };
 }
 
 function hexCorners(cx, cy, size) {
   const pts = [];
   for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
+    const angle = (Math.PI / 180) * (60 * i);
     pts.push(`${cx + size * Math.cos(angle)},${cy + size * Math.sin(angle)}`);
   }
   return pts.join(' ');

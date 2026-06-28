@@ -26,11 +26,13 @@ export default function GMDashboard() {
   const [game, setGame] = useState(null);
   const [factions, setFactions] = useState([]);
   const [participants, setParticipants] = useState([]);
-  const [addForm, setAddForm] = useState({ username: '', name: '', color: '#ef4444' });
+  const [addForm, setAddForm] = useState({ profileId: '', name: '', color: '#ef4444' });
+  const [allProfiles, setAllProfiles] = useState([]);
   const [unitForm, setUnitForm] = useState({ factionId: '', type: 'Infantry', q: 0, r: 0, qty: 1 });
   const [turnStatus, setTurnStatus] = useState([]);
   const [autoResolve, setAutoResolve] = useState(true);
   const [msg, setMsg] = useState('');
+  const [mapKey, setMapKey] = useState(0);
   const [combatLog, setCombatLog] = useState(null);
   const [logTurn, setLogTurn] = useState(null);
 
@@ -53,18 +55,32 @@ export default function GMDashboard() {
     if (ts.ok) setTurnStatus(await ts.json());
   }
 
-  useEffect(() => { load(); }, [gameId]);
+  useEffect(() => {
+    load();
+    supabase.from('profiles').select('id, username').then(({ data }) => setAllProfiles(data ?? []));
+
+    // Reload map and sidebar when any client or the server advances the turn
+    const channel = supabase
+      .channel(`gm-turn-watch-${gameId}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` },
+        () => { load(); setMapKey(k => k + 1); }
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [gameId]);
 
   async function addFaction(e) {
     e.preventDefault();
+    if (!addForm.profileId) return setMsg('Select a user.');
     const h = await headers();
-    const participant = participants.find(p => p.profiles?.username === addForm.username);
-    if (!participant) return setMsg(`User "${addForm.username}" not found in this game.`);
     const r = await fetch(`${SERVER}/api/games/${gameId}/factions`, {
       method: 'POST', headers: h,
-      body: JSON.stringify({ profile_id: participant.profiles.id, name: addForm.name, color: addForm.color }),
+      body: JSON.stringify({ profile_id: addForm.profileId, name: addForm.name, color: addForm.color }),
     });
-    if (r.ok) { setMsg('Faction added.'); load(); } else { const d = await r.json(); setMsg(d.error); }
+    if (r.ok) { setMsg('Faction added.'); setAddForm(f => ({ ...f, profileId: '', name: '' })); load(); }
+    else { const d = await r.json(); setMsg(d.error); }
   }
 
   async function placeUnit(e) {
@@ -74,13 +90,13 @@ export default function GMDashboard() {
       method: 'POST', headers: h,
       body: JSON.stringify({ faction_id: unitForm.factionId, unit_type_name: unitForm.type, hex_q: Number(unitForm.q), hex_r: Number(unitForm.r), quantity: Number(unitForm.qty) }),
     });
-    if (r.ok) setMsg('Unit placed.'); else { const d = await r.json(); setMsg(d.error); }
+    if (r.ok) { setMsg('Unit placed.'); setMapKey(k => k + 1); } else { const d = await r.json(); setMsg(d.error); }
   }
 
   async function advanceTurn() {
     const h = await headers();
     const r = await fetch(`${SERVER}/api/gm/${gameId}/advance-turn`, { method: 'POST', headers: h });
-    if (r.ok) { setMsg('Turn advanced.'); load(); } else setMsg('Error advancing turn.');
+    if (r.ok) { setMsg('Turn advanced.'); load(); setMapKey(k => k + 1); } else setMsg('Error advancing turn.');
   }
 
   async function loadCombatLog(turn) {
@@ -146,7 +162,8 @@ export default function GMDashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
         <div>
-          <HexMap gameId={gameId} isGM />
+          <HexMap gameId={gameId} isGM refreshKey={mapKey}
+            onHexSelect={h => setUnitForm(f => ({ ...f, q: h.hex_q, r: h.hex_r }))} />
         </div>
 
         <div>
@@ -183,8 +200,13 @@ export default function GMDashboard() {
               </div>
             ))}
             <form onSubmit={addFaction} style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
-              <div style={s.label}>Add faction by username</div>
-              <input style={s.input} placeholder="username" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
+              <div style={s.label}>Add faction — select player</div>
+              <select style={s.input} value={addForm.profileId} onChange={e => setAddForm(f => ({ ...f, profileId: e.target.value }))}>
+                <option value="">— choose user —</option>
+                {allProfiles.map(p => (
+                  <option key={p.id} value={p.id}>{p.username}</option>
+                ))}
+              </select>
               <input style={s.input} placeholder="Faction name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ ...s.label, marginBottom: 0 }}>Color</label>

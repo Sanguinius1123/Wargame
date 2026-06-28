@@ -16,15 +16,7 @@
 // the cost would exceed budget; this lets a unit always enter an adjacent hex.
 // =============================================================
 
-// ---------------------------------------------------------------------------
-// Hex adjacency (axial coordinates)
-// Two hexes are adjacent when the Chebyshev distance in cube coords equals 1.
-// ---------------------------------------------------------------------------
-function isAdjacent(q1, r1, q2, r2) {
-  const dq = q2 - q1;
-  const dr = r2 - r1;
-  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) === 1;
-}
+import { isAdjacent } from './hexGeometry.js';
 
 // ---------------------------------------------------------------------------
 // Cost to enter a single hex for a given unit type.
@@ -218,10 +210,9 @@ export async function executeGroundMoves(db, gameId, turn) {
   const unitPaths = [];
   for (const [unitId, entry] of unitOrdersMap) {
     entry.waypoints.sort((a, b) => a.sequence - b.sequence);
-    const path = [
-      { q: entry.unit.hex_q, r: entry.unit.hex_r }, // origin
-      ...entry.waypoints.map((w) => ({ q: w.q, r: w.r })),
-    ];
+    // Waypoints already include the start hex at sequence 0 (sent by the client).
+    // Do NOT prepend unit.hex_q/r again — that would double the start hex.
+    const path = entry.waypoints.map((w) => ({ q: w.q, r: w.r }));
     unitPaths.push({ unitId, unit: entry.unit, unitType: entry.unitType, path });
   }
 
