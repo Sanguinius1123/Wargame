@@ -490,10 +490,11 @@ export async function resetTurnReady(db, gameId) {
 // runPhase4 — convenience wrapper for advance-turn
 // ---------------------------------------------------------------------------
 export async function runPhase4(db, gameId, currentTurn) {
-  // Repair and build orders process first; production + materials can run in parallel with those.
-  const [repairResult, buildResult, materials, production] = await Promise.all([
-    processRepairOrders(db, gameId, currentTurn),
-    processBuildOrders(db, gameId, currentTurn),
+  // Repair and build both deduct faction resources — must be sequential to avoid read-modify-write races.
+  const repairResult = await processRepairOrders(db, gameId, currentTurn);
+  const buildResult  = await processBuildOrders(db, gameId, currentTurn);
+  // Materials collection and production do not deduct resources — safe to parallelize.
+  const [materials, production] = await Promise.all([
     collectMaterials(db, gameId),
     advanceProduction(db, gameId, currentTurn),
   ]);
