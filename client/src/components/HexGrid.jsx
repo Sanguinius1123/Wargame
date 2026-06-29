@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 // Terrain color palette
 const TERRAIN_COLORS = {
-  plains:   '#4a7c59',
-  hills:    '#7a8c5a',
-  mountains:'#6b6b6b',
-  desert:   '#c4a35a',
-  wetlands: '#3d6b5a',
-  water:    '#1a3a5c',
+  plains:   '#7ec87a',
+  hills:    '#b8a84a',
+  mountains:'#8a8a8a',
+  desert:   '#d4b55a',
+  wetlands: '#4a8a78',
+  water:    '#1e4d8c',
 };
 
 const VISIBILITY_OVERLAY = {
@@ -260,12 +260,12 @@ export default function HexGrid({
               />
             )}
 
-            {/* Vegetation overlay — tinted green wash */}
+            {/* Vegetation overlay */}
             {!isDark && h.has_heavy_vegetation && (
-              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(34,197,94,0.18)" stroke="none" style={{ pointerEvents: 'none' }} />
+              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(20,80,30,0.72)" stroke="none" style={{ pointerEvents: 'none' }} />
             )}
             {!isDark && h.has_light_vegetation && !h.has_heavy_vegetation && (
-              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(134,239,172,0.12)" stroke="none" style={{ pointerEvents: 'none' }} />
+              <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(30,130,50,0.40)" stroke="none" style={{ pointerEvents: 'none' }} />
             )}
 
             {/* Settlement star */}
