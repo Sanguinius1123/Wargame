@@ -347,9 +347,9 @@ export default function HexGrid({
         const b2x = x1 + dx * 0.67, b2y = y1 + dy * 0.67;
         return (
           <g key={`r${i}`} style={{ pointerEvents: 'none' }}>
-            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#92400e" strokeWidth={4} strokeLinecap="round" />
-            <line x1={b1x - px} y1={b1y - py} x2={b1x + px} y2={b1y + py} stroke="#92400e" strokeWidth={3} strokeLinecap="round" />
-            <line x1={b2x - px} y1={b2y - py} x2={b2x + px} y2={b2y + py} stroke="#92400e" strokeWidth={3} strokeLinecap="round" />
+            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#5c1f00" strokeWidth={4} strokeLinecap="round" />
+            <line x1={b1x - px} y1={b1y - py} x2={b1x + px} y2={b1y + py} stroke="#5c1f00" strokeWidth={3} strokeLinecap="round" />
+            <line x1={b2x - px} y1={b2y - py} x2={b2x + px} y2={b2y + py} stroke="#5c1f00" strokeWidth={3} strokeLinecap="round" />
           </g>
         );
       })}
