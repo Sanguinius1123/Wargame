@@ -268,6 +268,16 @@ export default function HexGrid({
               <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(30,130,50,0.40)" stroke="none" style={{ pointerEvents: 'none' }} />
             )}
 
+            {/* Bridge icon — two planks + two support posts */}
+            {!isDark && h.has_bridge && (
+              <g style={{ pointerEvents: 'none' }}>
+                <line x1={cx - SIZE * 0.38} y1={cy - 4} x2={cx + SIZE * 0.38} y2={cy - 4} stroke="#92400e" strokeWidth={2.5} strokeLinecap="round" />
+                <line x1={cx - SIZE * 0.38} y1={cy + 4} x2={cx + SIZE * 0.38} y2={cy + 4} stroke="#92400e" strokeWidth={2.5} strokeLinecap="round" />
+                <line x1={cx - SIZE * 0.18} y1={cy - 9} x2={cx - SIZE * 0.18} y2={cy + 9} stroke="#92400e" strokeWidth={1.5} />
+                <line x1={cx + SIZE * 0.18} y1={cy - 9} x2={cx + SIZE * 0.18} y2={cy + 9} stroke="#92400e" strokeWidth={1.5} />
+              </g>
+            )}
+
             {/* Settlement star */}
             {!isDark && h.has_settlement && (
               <text x={cx + SIZE * 0.45} y={cy - SIZE * 0.42} textAnchor="middle" fontSize={11}
