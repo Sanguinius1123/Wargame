@@ -97,8 +97,13 @@ router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
   const allReady = players?.length > 0 && players.every(p => p.turn_ready);
 
   if (allReady && game?.auto_resolve !== false) {
-    const result = await resolveTurn(adminDb, gameId);
-    return res.json({ advanced: true, current_turn: result.game?.current_turn, phase3: result.phase3, phase4: result.phase4 });
+    try {
+      const result = await resolveTurn(adminDb, gameId);
+      return res.json({ advanced: true, current_turn: result.game?.current_turn, phase3: result.phase3, phase4: result.phase4 });
+    } catch (err) {
+      console.error('[finish-turn] resolveTurn threw:', err);
+      return res.status(500).json({ error: err.message });
+    }
   }
 
   if (allReady && game?.auto_resolve === false) {

@@ -20,7 +20,7 @@
  * @param {Set<string>} movedUnitIds - Set of unit UUIDs that successfully moved this turn
  * @returns {{ fortified: number, cleared: number }}
  */
-export async function processEndOfPhase3(db, gameId, turn, movedUnitIds) {
+export async function processEndOfPhase3(db, gameId, turn, movedUnitIds = new Set()) {
   let fortified = 0;
   let cleared = 0;
 

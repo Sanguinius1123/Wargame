@@ -177,7 +177,7 @@ export async function executeGroundMoves(db, gameId, turn) {
   }
 
   if (!orders || orders.length === 0) {
-    return { moved: 0, skipped: 0, errors: [] };
+    return { moved: 0, skipped: 0, errors: [], movedUnitIds: new Set() };
   }
 
   // ------------------------------------------------------------------
