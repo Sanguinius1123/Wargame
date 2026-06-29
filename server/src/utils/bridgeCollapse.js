@@ -67,19 +67,23 @@ export async function handleBridgeCollapse(db, gameId, hexQ, hexR, turn, hexData
     return h && h.terrain !== 'water';
   });
 
-  // Query which faction(s) occupy each adjacent land hex
+  // Query units on adjacent land hexes to know who's there and how many
   const { data: neighborUnits } = await db
     .from('units')
-    .select('hex_q, hex_r, faction_id')
-    .eq('game_id', gameId)
-    .in('hex_q', landNeighbors.map(n => n.q));
+    .select('hex_q, hex_r, faction_id, quantity')
+    .eq('game_id', gameId);
 
-  // Build map: hexKey → Set<faction_id>
-  const factionsAtHex = new Map();
+  const neighborSet = new Set(landNeighbors.map(n => `${n.q},${n.r}`));
+
+  // hexKey → { friendlyQty, enemyQty } (computed per unit below)
+  const hexPresence = new Map(); // hexKey → { factions: Set, enemyQty: number }
   for (const u of neighborUnits ?? []) {
     const k = `${u.hex_q},${u.hex_r}`;
-    if (!factionsAtHex.has(k)) factionsAtHex.set(k, new Set());
-    factionsAtHex.get(k).add(u.faction_id);
+    if (!neighborSet.has(k)) continue;
+    if (!hexPresence.has(k)) hexPresence.set(k, { factions: new Set(), enemyQty: 0 });
+    hexPresence.get(k).factions.add(u.faction_id);
+    hexPresence.get(k).rawUnits = hexPresence.get(k).rawUnits ?? [];
+    hexPresence.get(k).rawUnits.push(u);
   }
 
   for (const unit of groundUnits) {
@@ -104,19 +108,26 @@ export async function handleBridgeCollapse(db, gameId, hexQ, hexR, turn, hexData
       destQ = prev.to_hex_q;
       destR = prev.to_hex_r;
     } else {
-      // No usable orders — pick adjacent land hex, preferring no enemies
-      const preferred = landNeighbors.filter(n => {
+      // No usable orders — pick adjacent land hex.
+      // Prefer hexes with no enemies; if all have enemies, pick the one
+      // with the fewest total enemy units (survivors enter close combat there).
+      const withEnemyCount = landNeighbors.map(n => {
         const k = `${n.q},${n.r}`;
-        const factions = factionsAtHex.get(k);
-        return !factions || !factions.has || factions.size === 0 ||
-               (factions.size === 1 && factions.has(unit.faction_id));
+        const presence = hexPresence.get(k);
+        const enemyQty = (presence?.rawUnits ?? [])
+          .filter(u => u.faction_id !== unit.faction_id)
+          .reduce((sum, u) => sum + (u.quantity ?? 1), 0);
+        return { n, enemyQty };
       });
-      const pool = preferred.length > 0 ? preferred : landNeighbors;
-      if (pool.length > 0) {
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        destQ = pick.q;
-        destR = pick.r;
-      }
+
+      const clear = withEnemyCount.filter(x => x.enemyQty === 0);
+      const pool = clear.length > 0 ? clear : withEnemyCount;
+      // Among equal-enemy-count hexes, pick randomly
+      const minEnemy = Math.min(...pool.map(x => x.enemyQty));
+      const best = pool.filter(x => x.enemyQty === minEnemy);
+      const pick = best[Math.floor(Math.random() * best.length)];
+      destQ = pick.n.q;
+      destR = pick.n.r;
     }
 
     // Roll 75% survival per unit in the stack
