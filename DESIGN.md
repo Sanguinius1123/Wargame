@@ -1063,6 +1063,19 @@ Collapsible sidebar: units needing orders, idle facilities.
 
 ## Pending Dev Work (next sessions)
 
+- **Map visual overhaul (player portal)** — several visual issues to fix together in one pass:
+  - **Remove terrain text label** from hex tiles in the player view. Terrain type should only be discoverable via a collapsible legend (color swatch + name), tucked away (collapsed by default, expandable via a small button in a corner of the map). GM view can keep labels if useful.
+  - **Remove grid coordinate labels** (q,r) from all hexes in the player view. Hex coords should only appear in the hex detail panel when a tile is selected.
+  - **Terrain colors need to be more distinct and less saturated overall:**
+    - Plains: too lime-green currently — shift to a muted, earthy green (e.g. `#6b7c45` or similar olive tone)
+    - Light vegetation: needs to be noticeably darker green than plains
+    - Heavy vegetation: darker still than light veg — should read as dense jungle/forest, not just a tint
+    - Hills and mountains currently look good — use them as the reference point for saturation/contrast level
+    - Water, desert, wetlands: review for distinctness against the new palette
+  - **Urban hex background color** — urban tiles (`has_urban`) should have a distinct background color (e.g. warm gray or tan `#9e8f7a`) instead of just the terrain color underneath, so they're immediately readable as built-up area. The purple building icon alone is not enough.
+  - **Settlement presentation** — settlements (`has_settlement`) need stronger visual treatment. Options to consider: render the settlement name as a text label on the hex (already exists for some hexes), plus a distinct center icon (gold star ★ or a small city silhouette SVG) that is larger/more prominent than the current star. Settlement hex should still show the urban background color since settlements are always urban. The name label + icon combination should make settlements unmistakable at a glance.
+  - Keep all of the above changes isolated to the player-facing `HexGrid.jsx` render — GM view may retain labels/coords for usability.
+
 - **Player bridge build order not resolving** — the "Build Bridge" UI exists in the supply truck order panel (2-step water/land hex selection, confirmed working). The build order is submitted correctly to the server. However, `processBuildOrders` in `server/src/utils/phase4.js` handles `structure_type='bridge'` by creating the bridge building but does NOT set `has_road=true` on all 3 hexes or `has_bridge=true` on the water hex. Need to add that logic: truck hex (`unit.hex_q/r`) + water hex (`target_hex_q/r`) + far land hex (`to_hex_q/r`) all get `has_road=true`; water hex also gets `has_bridge=true`. GM bridge placement works correctly as a reference.
 
 - **Naval unit LOS** — naval units have `los` values set in the seed (Destroyer=4, Frigate=5, Cruiser=4, Battleship=4, Carrier=5, Submarine=0) but this has not been tested in practice. Verify that ships are correctly contributing to faction fog-of-war. Submarine `los=0` is intentional (underwater). Consider whether naval LOS should be blocked by land terrain (hills/mountains on land hexes should presumably not block a ship's view of the sea, but a coastal mountain range could block line-of-sight to a harbor).
