@@ -57,7 +57,7 @@ Full game design: `DESIGN.md`
 ### Movement
 - **Movement engine:** Internal ×3 scale (all movement stats and terrain costs stored ×3). Formula: `max(1, ceil(movement / cost))`. Both ground and naval movement are **step-by-step and simultaneous**. Contact triggers on: (1) **same hex** → hex collision, both stop, close combat; (2) **path crossing** (A→B while B→A same step) → border battle, both stop, simultaneous fire, loser retreats, winner continues. Mere adjacency does NOT stop movement. Ranged fire step covers firing at nearby enemies after movement ends.
 - **`mechanized` tag** (Armor, Supply) determines mechanized terrain costs. `mobile` alone does not mean mechanized (cavalry, eagle riders = mobile but foot costs). Mountains impassable for mechanized without road; `has_heavy_vegetation` impassable for mechanized. Foot units can always enter any ground terrain.
-- **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale).
+- **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale). Water hexes must have `has_bridge = true` to carry `has_road = true` — a road cannot cross water without a bridge.
 - **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
 - **Canals:** `has_canal` allows naval through Wetlands. 10 manpower, supply truck present (not consumed).
 - **Air movement:** Ignore terrain. Fighter move=30, Scout=35, Bomber=40, Transport Plane=25.
