@@ -59,6 +59,7 @@ Full game design: `DESIGN.md`
 - **`mechanized` tag** (Armor, Supply) determines mechanized terrain costs. `mobile` alone does not mean mechanized (cavalry, eagle riders = mobile but foot costs). Mountains impassable for mechanized without road; `has_heavy_vegetation` impassable for mechanized. Foot units can always enter any ground terrain.
 - **Road movement:** 2/3 terrain cost (road cost = terrain_cost × 2 in ×3 scale). Water hexes must have `has_bridge = true` to carry `has_road = true` — a road cannot cross water without a bridge.
 - **Supply truck:** One action per turn — moves OR builds, not both. Road: up to 3 segments/turn in adjacent hexes (not consumed). Airstrip/Bridge/Fortification/Canal: truck consumed, completes in Phase 4. If truck destroyed in Phase 3 before Phase 4 completes, construction fails and resources are lost.
+- **Bridge construction (player):** Player selects land hex → water hex → land hex (same flow as GM bridge tool). The supply truck must be in one of the two land hexes selected AND that land hex must be adjacent to the water hex. The truck is consumed on placement, bridge completes Phase 4.
 - **Canals:** `has_canal` allows naval through Wetlands. 10 manpower, supply truck present (not consumed).
 - **Air movement:** Ignore terrain. Fighter move=30, Scout=35, Bomber=40, Transport Plane=25.
 
