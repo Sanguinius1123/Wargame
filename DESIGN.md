@@ -1061,6 +1061,27 @@ Collapsible sidebar: units needing orders, idle facilities.
 
 ---
 
+## Pending Dev Work (next sessions)
+
+- **Player bridge build order not resolving** — the "Build Bridge" UI exists in the supply truck order panel (2-step water/land hex selection, confirmed working). The build order is submitted correctly to the server. However, `processBuildOrders` in `server/src/utils/phase4.js` handles `structure_type='bridge'` by creating the bridge building but does NOT set `has_road=true` on all 3 hexes or `has_bridge=true` on the water hex. Need to add that logic: truck hex (`unit.hex_q/r`) + water hex (`target_hex_q/r`) + far land hex (`to_hex_q/r`) all get `has_road=true`; water hex also gets `has_bridge=true`. GM bridge placement works correctly as a reference.
+
+---
+
+## Design Notes — Air Phase Rework (not yet implemented)
+
+Ideas to consider when Phase 1 air is being built. **Do not implement until air phase work begins.**
+
+**Step-based AA and intercept:**
+- Aircraft move hex-by-hex. Casualties assessed at each movement step, not in one lump at the end.
+- AA fires at airgroups for each step they take through hexes the AA covers (currently fires once per turn). Slightly nerf AA to-hit or dice count to compensate for firing multiple times.
+- If multiple airgroups enter AA range in one step, AA picks one target per step. AA prefers groups NOT already engaged with friendly interceptors.
+- Option/toggle: allow AA to fire anyway even if friendly planes are engaged with enemy air in the same hex step (friendly fire risk vs suppression value).
+- Fighter patrols still engage only ONCE per turn total (not once per step). Patrol picks one enemy airgroup to fight; if multiple groups pass through its airspace it selects the first unengaged one.
+- This collapses the current two-sub-phases (AA overwatch → patrol intercept) into a single step-resolution loop: each step → AA fires at any groups in range → patrol intercept triggered if applicable.
+- Could reduce overall casualty scale in air combat to keep attrition from feeling too punishing across many steps.
+
+---
+
 ## Future Features
 
 - **Railroads** — `has_railroad` hex attribute. Very fast ground unit movement. Expensive to build. Supply unit + large material/manpower cost.
