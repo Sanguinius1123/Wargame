@@ -11,6 +11,7 @@ Build a playable wargame with: hex map + terrain, territory control, two resourc
 - **Pull before working:** Always run `git pull origin main` at the start of every session before making changes. Kyle switches between two PCs and git is the sync mechanism.
 - **Push when done:** When Kyle signals end of day ("done for the day", "signing off", "clean up", etc.) — commit everything and `git push origin main`. Don't wait to be asked.
 - **Use agents proactively:** When a task is well-defined and parallelizable, spawn agents rather than doing everything inline. Agents finish faster and Kyle can continue the conversation here while they work. Good candidates: writing a migration, implementing a utility file, wiring a server route, building a UI component.
+- **Todo list:** `TODO.md` in the project root. Keep it updated — it syncs via git between machines and sessions.
 - **Memory files are PC-local:** `C:\Users\kyle\.claude\...` memory files don't sync between machines. DESIGN.md and CLAUDE.md are the authoritative cross-machine source of truth — read these first.
 - **Supabase:** Project URL: `https://wdfsoyqnjxwmlmnvvkbz.supabase.co`. Registration code: `wargame`. GM email: `macarthur1123@gmail.com`.
 
