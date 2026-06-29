@@ -14,7 +14,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   // Load all hexes (GM queries bypass RLS via adminDb)
   const { data: hexes, error } = await adminDb
     .from('hexes')
-    .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, has_road, has_canal, has_railroad')
+    .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, settlement_name, has_road, has_bridge, has_canal, has_railroad')
     .eq('game_id', gameId);
   if (error) return res.status(500).json({ error: error.message });
 
