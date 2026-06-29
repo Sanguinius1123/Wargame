@@ -138,7 +138,7 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
   const {
     terrain, owner_faction_id,
     has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp,
-    has_settlement, has_road, has_canal, has_railroad,
+    has_settlement, has_road, has_bridge, has_canal, has_railroad,
   } = req.body;
 
   const updates = {};
@@ -150,6 +150,7 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
   if (urban_hp !== undefined) updates.urban_hp = urban_hp;
   if (has_settlement !== undefined) updates.has_settlement = has_settlement;
   if (has_road !== undefined) updates.has_road = has_road;
+  if (has_bridge !== undefined) updates.has_bridge = has_bridge;
   if (has_canal !== undefined) updates.has_canal = has_canal;
   if (has_railroad !== undefined) updates.has_railroad = has_railroad;
 
@@ -163,6 +164,28 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
+
+  // Sync bridge building with has_bridge attribute
+  if (has_bridge === true) {
+    const { data: existing } = await adminDb
+      .from('buildings')
+      .select('id')
+      .eq('game_id', gameId).eq('hex_q', Number(q)).eq('hex_r', Number(r))
+      .eq('type', 'bridge')
+      .maybeSingle();
+    if (!existing) {
+      await adminDb.from('buildings').insert({
+        game_id: gameId, hex_q: Number(q), hex_r: Number(r),
+        type: 'bridge', current_hp: 4, max_hp: 4,
+      });
+    }
+  } else if (has_bridge === false) {
+    await adminDb.from('buildings')
+      .delete()
+      .eq('game_id', gameId).eq('hex_q', Number(q)).eq('hex_r', Number(r))
+      .eq('type', 'bridge');
+  }
+
   res.json(data);
 });
 

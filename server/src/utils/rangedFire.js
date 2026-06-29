@@ -25,6 +25,7 @@
 // =============================================================
 
 import { defenseBonus, distributeDice } from './combat.js';
+import { handleBridgeCollapse } from './bridgeCollapse.js';
 
 // ---------------------------------------------------------------------------
 // roll2d6
@@ -181,7 +182,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   // -------------------------------------------------------------------------
   const { data: hexRows, error: hexError } = await db
     .from('hexes')
-    .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
+    .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation')
     .eq('game_id', gameId);
 
   if (hexError) {
@@ -584,6 +585,18 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     if (newHp <= 0) {
       const { error } = await db.from('buildings').delete().eq('id', buildingId);
       if (error) errors.push(`Failed to delete building ${buildingId}: ${error.message}`);
+
+      if (building.type === 'bridge') {
+        const { logEntries: collapseLog, errors: collapseErrors } =
+          await handleBridgeCollapse(db, gameId, building.hex_q, building.hex_r, turn, hexDataByKey);
+        errors.push(...collapseErrors);
+        combatLogInserts.push({
+          game_id: gameId, turn, phase: 3,
+          hex_q: building.hex_q, hex_r: building.hex_r,
+          log_type: 'bridge_collapse',
+          data: { hex: { q: building.hex_q, r: building.hex_r }, units: collapseLog },
+        });
+      }
     } else {
       const { error } = await db
         .from('buildings')
