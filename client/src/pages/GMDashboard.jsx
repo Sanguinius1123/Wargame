@@ -35,6 +35,8 @@ export default function GMDashboard() {
   const [mapKey, setMapKey] = useState(0);
   const [combatLog, setCombatLog] = useState(null);
   const [logTurn, setLogTurn] = useState(null);
+  const [bridgeMode, setBridgeMode] = useState(false);
+  const [bridgePicks, setBridgePicks] = useState([]);
 
   async function headers() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -121,6 +123,46 @@ export default function GMDashboard() {
     });
   }
 
+  function handleHexSelect(h) {
+    if (!bridgeMode) {
+      setUnitForm(f => ({ ...f, q: h.hex_q, r: h.hex_r }));
+      return;
+    }
+    const step = bridgePicks.length;
+    if (step === 0) {
+      if (h.terrain === 'water') { setMsg('Step 1: pick a land hex first.'); return; }
+      setBridgePicks([h]);
+      setMsg('Step 2/3 — click the water hex.');
+    } else if (step === 1) {
+      if (h.terrain !== 'water') { setMsg('Step 2: pick the water hex.'); return; }
+      setBridgePicks(p => [...p, h]);
+      setMsg('Step 3/3 — click the second land hex.');
+    } else if (step === 2) {
+      if (h.terrain === 'water') { setMsg('Step 3: pick a land hex.'); return; }
+      if (h.hex_q === bridgePicks[0].hex_q && h.hex_r === bridgePicks[0].hex_r) {
+        setMsg('Step 3: must be a different hex than the first.'); return;
+      }
+      placeBridge([bridgePicks[0], bridgePicks[1], h]);
+    }
+  }
+
+  async function placeBridge(hexes) {
+    const h = await headers();
+    await Promise.all(hexes.map(hex =>
+      fetch(`${SERVER}/api/map/${gameId}/hexes/${hex.hex_q}/${hex.hex_r}`, {
+        method: 'PATCH', headers: h,
+        body: JSON.stringify({
+          has_road: true,
+          ...(hex.terrain === 'water' ? { has_bridge: true } : {}),
+        }),
+      })
+    ));
+    setMsg('Bridge placed.');
+    setBridgeMode(false);
+    setBridgePicks([]);
+    setMapKey(k => k + 1);
+  }
+
   const unitTypes = [
     'Infantry','Armor','Artillery','AT Gun','AA Gun','Supply','Recon',
     'Fighter','Scout Plane','Bomber','Transport Plane',
@@ -162,8 +204,7 @@ export default function GMDashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
         <div>
-          <HexMap gameId={gameId} isGM refreshKey={mapKey}
-            onHexSelect={h => setUnitForm(f => ({ ...f, q: h.hex_q, r: h.hex_r }))} />
+          <HexMap gameId={gameId} isGM refreshKey={mapKey} onHexSelect={handleHexSelect} />
         </div>
 
         <div>
@@ -236,6 +277,33 @@ export default function GMDashboard() {
             )}
             {!combatLog && (
               <p style={{ color: '#64748b', fontSize: 12 }}>Click Load to view the last resolved turn's combat events.</p>
+            )}
+          </div>
+
+          {/* Bridge Tool */}
+          <div style={s.panel}>
+            <div style={s.h2}>Bridge Tool</div>
+            {!bridgeMode ? (
+              <button style={s.btn} onClick={() => { setBridgeMode(true); setBridgePicks([]); setMsg('Step 1/3 — click the first land hex.'); }}>
+                Place Bridge
+              </button>
+            ) : (
+              <div>
+                <div style={{ color: '#fbbf24', fontSize: 12, marginBottom: 8 }}>
+                  {bridgePicks.length === 0 && 'Step 1/3 — click the first land hex'}
+                  {bridgePicks.length === 1 && 'Step 2/3 — click the water hex'}
+                  {bridgePicks.length === 2 && 'Step 3/3 — click the second land hex'}
+                </div>
+                {bridgePicks.map((p, i) => (
+                  <div key={i} style={{ color: '#94a3b8', fontSize: 11, marginBottom: 3 }}>
+                    {['Land start', 'Water', 'Land end'][i]}: ({p.hex_q}, {p.hex_r})
+                  </div>
+                ))}
+                <button style={{ ...s.btn, background: '#374151', marginTop: 8 }}
+                  onClick={() => { setBridgeMode(false); setBridgePicks([]); setMsg(''); }}>
+                  Cancel
+                </button>
+              </div>
             )}
           </div>
 
