@@ -16,9 +16,9 @@ router.get('/', requireAuth, async (req, res) => {
   res.json(data.map(d => ({ ...d.games, role: d.role })));
 });
 
-// POST /api/games — GM creates a new game
+// POST /api/games — GM creates a new game; optional map_id seeds hexes from a saved template
 router.post('/', requireGM, async (req, res) => {
-  const { name, map_width = 20, map_height = 20 } = req.body;
+  const { name, map_width = 20, map_height = 20, map_id } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
 
   const { data: game, error } = await adminDb
@@ -30,6 +30,17 @@ router.post('/', requireGM, async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   await adminDb.from('game_participants').insert({ game_id: game.id, profile_id: req.user.id, role: 'gm' });
+
+  // Optionally seed hexes from a saved map template
+  if (map_id) {
+    const { data: mapHexes } = await adminDb
+      .from('map_hexes')
+      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+      .eq('map_id', map_id);
+    if (mapHexes?.length) {
+      await adminDb.from('hexes').insert(mapHexes.map(h => ({ game_id: game.id, ...h, urban_hp: 4 })));
+    }
+  }
 
   res.status(201).json(game);
 });

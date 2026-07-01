@@ -21,13 +21,19 @@ const s = {
 export default function GameList() {
   const { profile, session, signOut } = useAuth();
   const [games, setGames] = useState([]);
+  const [maps, setMaps] = useState([]);
   const [newName, setNewName] = useState('');
+  const [selectedMapId, setSelectedMapId] = useState('');
   const nav = useNavigate();
 
   async function load() {
     const { data: { session: s } } = await supabase.auth.getSession();
-    const r = await fetch(`${SERVER}/api/games`, { headers: { Authorization: `Bearer ${s?.access_token}` } });
-    if (r.ok) setGames(await r.json());
+    const [gr, mr] = await Promise.all([
+      fetch(`${SERVER}/api/games`, { headers: { Authorization: `Bearer ${s?.access_token}` } }),
+      fetch(`${SERVER}/api/maps`, { headers: { Authorization: `Bearer ${s?.access_token}` } }),
+    ]);
+    if (gr.ok) setGames(await gr.json());
+    if (mr.ok) setMaps(await mr.json());
   }
 
   useEffect(() => { load(); }, []);
@@ -36,12 +42,14 @@ export default function GameList() {
     e.preventDefault();
     if (!newName.trim()) return;
     const { data: { session: s } } = await supabase.auth.getSession();
+    const body = { name: newName };
+    if (selectedMapId) body.map_id = selectedMapId;
     const r = await fetch(`${SERVER}/api/games`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
-      body: JSON.stringify({ name: newName }),
+      body: JSON.stringify(body),
     });
-    if (r.ok) { setNewName(''); load(); }
+    if (r.ok) { setNewName(''); setSelectedMapId(''); load(); }
   }
 
   return (
@@ -52,8 +60,18 @@ export default function GameList() {
       </div>
 
       {profile?.global_role === 'gm' && (
-        <form onSubmit={createGame} style={{ marginBottom: 28 }}>
+        <form onSubmit={createGame} style={{ marginBottom: 28, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input style={s.input} placeholder="New game name…" value={newName} onChange={e => setNewName(e.target.value)} />
+          <select
+            style={{ ...s.input, marginRight: 0, minWidth: 160 }}
+            value={selectedMapId}
+            onChange={e => setSelectedMapId(e.target.value)}
+          >
+            <option value="">— no map —</option>
+            {maps.map(m => (
+              <option key={m.id} value={m.id}>{m.name} ({m.hex_count} hexes)</option>
+            ))}
+          </select>
           <button style={s.newBtn} type="submit">Create Game</button>
         </form>
       )}

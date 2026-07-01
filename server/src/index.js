@@ -5,6 +5,7 @@ import authRoutes  from './routes/auth.js';
 import gamesRoutes from './routes/games.js';
 import mapRoutes   from './routes/map.js';
 import gmRoutes    from './routes/gm.js';
+import mapsRoutes  from './routes/maps.js';
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? '*' }));
@@ -14,6 +15,7 @@ app.use('/api/auth',  authRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/map',   mapRoutes);
 app.use('/api/gm',    gmRoutes);
+app.use('/api/maps',  mapsRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

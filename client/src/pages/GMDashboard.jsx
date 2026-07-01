@@ -37,6 +37,9 @@ export default function GMDashboard() {
   const [logTurn, setLogTurn] = useState(null);
   const [bridgeMode, setBridgeMode] = useState(false);
   const [bridgePicks, setBridgePicks] = useState([]);
+  const [maps, setMaps] = useState([]);
+  const [mapSaveForm, setMapSaveForm] = useState({ name: '', description: '' });
+  const [showMapList, setShowMapList] = useState(false);
 
   async function headers() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -60,6 +63,7 @@ export default function GMDashboard() {
   useEffect(() => {
     load();
     supabase.from('profiles').select('id, username').then(({ data }) => setAllProfiles(data ?? []));
+    loadMaps();
 
     // Reload map and sidebar when any client or the server advances the turn
     const channel = supabase
@@ -111,6 +115,44 @@ export default function GMDashboard() {
       const d = await r.json();
       setCombatLog(d);
       setLogTurn(d.turn);
+    }
+  }
+
+  async function loadMaps() {
+    const h = await headers();
+    const r = await fetch(`${SERVER}/api/maps`, { headers: h });
+    if (r.ok) setMaps(await r.json());
+  }
+
+  async function saveAsMap(e) {
+    e.preventDefault();
+    if (!mapSaveForm.name.trim()) return setMsg('Map name required.');
+    const h = await headers();
+    const r = await fetch(`${SERVER}/api/gm/${gameId}/save-as-map`, {
+      method: 'POST', headers: h,
+      body: JSON.stringify(mapSaveForm),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      setMsg(`Saved "${d.name}" (${d.hex_count} hexes).`);
+      setMapSaveForm({ name: '', description: '' });
+      loadMaps();
+    } else {
+      setMsg(d.error ?? 'Failed to save map.');
+    }
+  }
+
+  async function loadMapIntoGame(mapId, mapName) {
+    if (!confirm(`Load "${mapName}"? This will clear all hexes, units, and buildings in this game.`)) return;
+    const h = await headers();
+    const r = await fetch(`${SERVER}/api/gm/${gameId}/load-map/${mapId}`, { method: 'POST', headers: h });
+    const d = await r.json();
+    if (r.ok) {
+      setMsg(`Loaded "${mapName}" (${d.loaded} hexes).`);
+      setShowMapList(false);
+      setMapKey(k => k + 1);
+    } else {
+      setMsg(d.error ?? 'Failed to load map.');
     }
   }
 
@@ -305,6 +347,43 @@ export default function GMDashboard() {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Map Library */}
+          <div style={s.panel}>
+            <div style={s.h2}>Map Library</div>
+            <form onSubmit={saveAsMap} style={{ marginBottom: 10 }}>
+              <div style={s.label}>Save current map as template</div>
+              <input style={s.input} placeholder="Template name…" value={mapSaveForm.name} onChange={e => setMapSaveForm(f => ({ ...f, name: e.target.value }))} />
+              <input style={s.input} placeholder="Description (optional)" value={mapSaveForm.description} onChange={e => setMapSaveForm(f => ({ ...f, description: e.target.value }))} />
+              <button style={s.btn} type="submit">Save as Map</button>
+            </form>
+            <div style={{ borderTop: '1px solid #1e293b', paddingTop: 10 }}>
+              <button
+                style={{ ...s.btn, background: '#374151', width: '100%', marginBottom: 8 }}
+                onClick={() => { setShowMapList(v => !v); if (!showMapList) loadMaps(); }}
+              >
+                {showMapList ? 'Hide' : `Load a Map (${maps.length} saved)`}
+              </button>
+              {showMapList && maps.length === 0 && (
+                <p style={{ color: '#64748b', fontSize: 12 }}>No saved maps yet.</p>
+              )}
+              {showMapList && maps.map(m => (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: '#e2e8f0', fontSize: 13 }}>{m.name}</div>
+                    {m.description && <div style={{ color: '#64748b', fontSize: 11 }}>{m.description}</div>}
+                    <div style={{ color: '#475569', fontSize: 11 }}>{m.hex_count} hexes</div>
+                  </div>
+                  <button
+                    style={{ ...s.btn, background: '#7c3aed', padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
+                    onClick={() => loadMapIntoGame(m.id, m.name)}
+                  >
+                    Load
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Place unit */}

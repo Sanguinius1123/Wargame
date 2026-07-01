@@ -229,4 +229,63 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   }
 });
 
+// POST /api/gm/:gameId/save-as-map — snapshot current game hexes as a reusable map template
+router.post('/:gameId/save-as-map', requireGM, async (req, res) => {
+  const { gameId } = req.params;
+  const { name, description } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name required' });
+
+  const { data: hexes, error: hexErr } = await adminDb
+    .from('hexes')
+    .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+    .eq('game_id', gameId);
+  if (hexErr) return res.status(500).json({ error: hexErr.message });
+  if (!hexes?.length) return res.status(400).json({ error: 'Game has no hexes to save' });
+
+  const { data: map, error: mapErr } = await adminDb
+    .from('maps')
+    .insert({ name: name.trim(), description: description?.trim() ?? null, created_by: req.user.id })
+    .select()
+    .single();
+  if (mapErr) return res.status(500).json({ error: mapErr.message });
+
+  const { error: insertErr } = await adminDb
+    .from('map_hexes')
+    .insert(hexes.map(h => ({ map_id: map.id, ...h })));
+  if (insertErr) {
+    await adminDb.from('maps').delete().eq('id', map.id);
+    return res.status(500).json({ error: insertErr.message });
+  }
+
+  res.json({ id: map.id, name: map.name, hex_count: hexes.length });
+});
+
+// POST /api/gm/:gameId/load-map/:mapId — overwrite game hexes from a saved map template
+// Also clears all units, buildings, orders, and scouted hexes for a clean slate.
+router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
+  const { gameId, mapId } = req.params;
+
+  const { data: mapHexes, error: mapErr } = await adminDb
+    .from('map_hexes')
+    .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+    .eq('map_id', mapId);
+  if (mapErr) return res.status(500).json({ error: mapErr.message });
+  if (!mapHexes?.length) return res.status(404).json({ error: 'Map not found or empty' });
+
+  // Wipe existing game state (cascades are not enough because faction data should survive)
+  await adminDb.from('units').delete().eq('game_id', gameId);
+  await adminDb.from('movement_orders').delete().eq('game_id', gameId);
+  await adminDb.from('buildings').delete().eq('game_id', gameId);
+  await adminDb.from('production_queue').delete().eq('game_id', gameId);
+  await adminDb.from('scouted_hexes').delete().eq('game_id', gameId);
+  await adminDb.from('hexes').delete().eq('game_id', gameId);
+
+  const { error: insertErr } = await adminDb
+    .from('hexes')
+    .insert(mapHexes.map(h => ({ game_id: gameId, ...h, urban_hp: 4 })));
+  if (insertErr) return res.status(500).json({ error: insertErr.message });
+
+  res.json({ loaded: mapHexes.length });
+});
+
 export default router;
