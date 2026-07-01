@@ -217,6 +217,7 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   }
 
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
   const turn = game.current_turn;
 
   // Clear existing orders for this unit this turn
@@ -285,6 +286,7 @@ router.post('/:gameId/production', requireAuth, async (req, res) => {
   }).eq('id', faction.id);
 
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
   const { data, error } = await adminDb.from('production_queue').insert({
     game_id: gameId, faction_id: faction.id, unit_type_id: unitType.id,
     factory_hex_q, factory_hex_r, quantity, created_turn: game.current_turn,
@@ -348,7 +350,151 @@ router.delete('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
   }
 
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
   await adminDb.from('movement_orders').delete().eq('unit_id', req.params.unitId).eq('turn', game.current_turn);
+  res.json({ ok: true });
+});
+
+// -----------------------------------------------------------------------
+// Flight group routes
+// -----------------------------------------------------------------------
+
+// POST /api/map/:gameId/flight-groups
+// Body: { mission_type, path, target_hex_q?, target_hex_r?, target_infra?, unit_ids[] }
+router.post('/:gameId/flight-groups', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const { mission_type, path, target_hex_q, target_hex_r, target_infra, unit_ids = [] } = req.body;
+  const isGM = req.user.global_role === 'gm';
+
+  const validMissions = ['bombing_run', 'attack_run', 'scout', 'sweep'];
+  if (!validMissions.includes(mission_type)) {
+    return res.status(400).json({ error: `Invalid mission_type: ${mission_type}` });
+  }
+  if (!Array.isArray(unit_ids) || unit_ids.length === 0) {
+    return res.status(400).json({ error: 'unit_ids must be a non-empty array' });
+  }
+
+  // Resolve player's faction
+  const { data: faction } = isGM
+    ? { data: null }
+    : await adminDb.from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).single();
+
+  if (!isGM && !faction) return res.status(403).json({ error: 'Not a participant' });
+
+  // Verify all units are air units belonging to the player's faction
+  const { data: units, error: unitErr } = await adminDb
+    .from('units')
+    .select('id, faction_id, unit_type_id, factions(profile_id), unit_type_config(tags)')
+    .eq('game_id', gameId)
+    .in('id', unit_ids);
+
+  if (unitErr) return res.status(500).json({ error: unitErr.message });
+  if (!units?.length) return res.status(404).json({ error: 'No units found' });
+
+  for (const u of units) {
+    if (!isGM && u.factions?.profile_id !== req.user.id) {
+      return res.status(403).json({ error: `Unit ${u.id} does not belong to your faction` });
+    }
+    if (!u.unit_type_config?.tags?.includes('air')) {
+      return res.status(400).json({ error: `Unit ${u.id} is not an air unit` });
+    }
+  }
+
+  const factionId = isGM ? units[0].faction_id : faction.id;
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+  const turn = game.current_turn;
+
+  // Create the flight group
+  const { data: group, error: groupErr } = await adminDb
+    .from('flight_groups')
+    .insert({
+      game_id: gameId, faction_id: factionId,
+      mission_type, path: path ?? [], status: 'pending', turn,
+      target_hex_q: target_hex_q ?? null,
+      target_hex_r: target_hex_r ?? null,
+      target_infra: target_infra ?? null,
+    })
+    .select()
+    .single();
+
+  if (groupErr) return res.status(500).json({ error: groupErr.message });
+
+  // Link units to the flight group
+  const fgUnitRows = unit_ids.map(uid => ({
+    flight_group_id: group.id,
+    unit_id: uid,
+  }));
+  const { error: linkErr } = await adminDb.from('flight_group_units').insert(fgUnitRows);
+  if (linkErr) {
+    await adminDb.from('flight_groups').delete().eq('id', group.id);
+    return res.status(500).json({ error: linkErr.message });
+  }
+
+  res.status(201).json({ ...group, unit_ids });
+});
+
+// GET /api/map/:gameId/flight-groups — this turn's flight groups for the requesting faction
+router.get('/:gameId/flight-groups', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+
+  let factionId = null;
+  if (!isGM) {
+    const { data: faction } = await adminDb.from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).single();
+    if (!faction) return res.status(403).json({ error: 'Not a participant' });
+    factionId = faction.id;
+  }
+
+  let query = adminDb
+    .from('flight_groups')
+    .select('id, faction_id, mission_type, path, target_hex_q, target_hex_r, target_infra, status, turn')
+    .eq('game_id', gameId)
+    .eq('turn', game.current_turn);
+
+  if (factionId) query = query.eq('faction_id', factionId);
+
+  const { data: groups, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Attach unit_ids to each group
+  if (groups?.length) {
+    const { data: fgUnits } = await adminDb
+      .from('flight_group_units')
+      .select('flight_group_id, unit_id')
+      .in('flight_group_id', groups.map(g => g.id));
+
+    const unitMap = new Map();
+    for (const row of fgUnits ?? []) {
+      if (!unitMap.has(row.flight_group_id)) unitMap.set(row.flight_group_id, []);
+      unitMap.get(row.flight_group_id).push(row.unit_id);
+    }
+    return res.json(groups.map(g => ({ ...g, unit_ids: unitMap.get(g.id) ?? [] })));
+  }
+
+  res.json(groups ?? []);
+});
+
+// DELETE /api/map/:gameId/flight-groups/:groupId — cancel a pending flight group
+router.delete('/:gameId/flight-groups/:groupId', requireAuth, async (req, res) => {
+  const { gameId, groupId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  const { data: group } = await adminDb
+    .from('flight_groups')
+    .select('id, faction_id, status, factions(profile_id)')
+    .eq('id', groupId)
+    .eq('game_id', gameId)
+    .single();
+
+  if (!group) return res.status(404).json({ error: 'Flight group not found' });
+  if (!isGM && group.factions?.profile_id !== req.user.id) return res.status(403).json({ error: 'Not your flight group' });
+  if (group.status !== 'pending') return res.status(400).json({ error: 'Can only cancel pending flight groups' });
+
+  await adminDb.from('flight_groups').delete().eq('id', groupId);
   res.json({ ok: true });
 });
 

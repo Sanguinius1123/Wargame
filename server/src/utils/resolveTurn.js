@@ -10,14 +10,20 @@ import { executeRangedFireStep } from './rangedFire.js';
 import { executeGroundCombat } from './combat.js';
 import { runPhase4 } from './phase4.js';
 import { computeVisibility, markScouted } from './visibility.js';
+import { executePhase1 } from './airPhase.js';
+import { executePhase2 } from './navalPhase.js';
 
 export async function resolveTurn(db, gameId) {
   const { data: game } = await db.from('games').select('current_turn').eq('id', gameId).single();
   const currentTurn = game?.current_turn ?? 0;
   const nextTurn = currentTurn + 1;
 
-  // Phase 1: Air — stub
-  // Phase 2: Naval — stub
+  // Phase 1: Air — AA overwatch + patrol intercepts; returns surviving bombers for Phase 2/3
+  const phase1Result = await executePhase1(db, gameId, currentTurn);
+  const { survivingBombers = [] } = phase1Result;
+
+  // Phase 2: Naval — step movement, contact, ranged fire, bomber strikes on water hexes
+  const phase2Result = await executePhase2(db, gameId, currentTurn, survivingBombers);
 
   // Phase 3: Retreats first (locked units escape before movers arrive)
   const retreatResult = await executeRetreatsAndPursuit(db, gameId, currentTurn);
@@ -34,11 +40,11 @@ export async function resolveTurn(db, gameId) {
   // Phase 3: Close combat — same-hex battles
   const combatResult = await executeGroundCombat(db, gameId, currentTurn);
 
-  // Clear orders
-  await db.from('movement_orders').delete().eq('game_id', gameId).eq('turn', currentTurn);
-
-  // Phase 4
+  // Phase 4 (repair/build orders must be read before we delete movement_orders)
   const phase4Result = await runPhase4(db, gameId, currentTurn);
+
+  // Clear orders now that Phase 4 has consumed them
+  await db.from('movement_orders').delete().eq('game_id', gameId).eq('turn', currentTurn);
 
   // Advance turn counter
   const { data: updated } = await db
@@ -58,6 +64,17 @@ export async function resolveTurn(db, gameId) {
 
   return {
     game: updated,
+    phase1: {
+      aa_engagements: phase1Result.aaLog?.length ?? 0,
+      intercepts: phase1Result.interceptLog?.length ?? 0,
+      surviving_bombers: survivingBombers.length,
+      errors: phase1Result.errors ?? [],
+    },
+    phase2: {
+      engagements: phase2Result.engagements?.length ?? 0,
+      bomber_strikes: phase2Result.bomberStrikes?.length ?? 0,
+      errors: phase2Result.errors ?? [],
+    },
     phase3: {
       retreats: retreatResult.retreatCount,
       pursuits: retreatResult.pursuitCount,

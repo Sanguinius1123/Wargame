@@ -457,20 +457,29 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
   }
 
   if (retreatFireLog.length > 0) {
-    combatLogInserts.push({
-      game_id: gameId,
-      turn,
-      phase: 3,
-      hex_q: 0,
-      hex_r: 0,
-      log_type: 'combat',
-      faction_id: null,
-      data: {
-        event: 'retreat_fire',
-        log: retreatFireLog,
-        casualties: Object.fromEntries(globalCasualties),
-      },
-    });
+    // Log per origin hex (group log entries by the hex the retreating unit left)
+    const fireByHex = new Map();
+    for (const die of retreatFireQueue) {
+      if (!fireByHex.has(die.originKey)) fireByHex.set(die.originKey, []);
+      fireByHex.get(die.originKey).push(die);
+    }
+    for (const [hexKey, dies] of fireByHex) {
+      const [hq, hr] = hexKey.split(',').map(Number);
+      combatLogInserts.push({
+        game_id: gameId,
+        turn,
+        phase: 3,
+        hex_q: hq,
+        hex_r: hr,
+        log_type: 'combat',
+        faction_id: null,
+        data: {
+          event: 'retreat_fire',
+          log: retreatFireLog.filter((_, i) => retreatFireQueue[i]?.originKey === hexKey),
+          casualties: Object.fromEntries(globalCasualties),
+        },
+      });
+    }
   }
 
   // -------------------------------------------------------------------------

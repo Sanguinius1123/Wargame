@@ -108,6 +108,15 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [productionQueue, setProductionQueue] = useState([]);
   const [prodMsg, setProdMsg] = useState('');
 
+  // Flight group state (air missions, player only)
+  const [flightGroups, setFlightGroups] = useState([]);
+  const [flightGroupMode, setFlightGroupMode] = useState(false);
+  const [flightGroupMission, setFlightGroupMission] = useState('sweep');
+  const [flightGroupPath, setFlightGroupPath] = useState([]);
+  const [flightGroupTargetQ, setFlightGroupTargetQ] = useState(null);
+  const [flightGroupTargetR, setFlightGroupTargetR] = useState(null);
+  const [flightGroupMsg, setFlightGroupMsg] = useState('');
+
   const load = useCallback(async () => {
     const headers = await authHeader();
     const url = viewAsFactionId
@@ -119,7 +128,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   }, [gameId, viewAsFactionId, refreshKey]);
 
   const loadProduction = useCallback(async () => {
-    if (isGM) return; // Skip for GM and viewAs mode (endpoint uses caller's profile_id)
+    if (isGM) return;
     const headers = await authHeader();
     const r = await fetch(`${SERVER}/api/map/${gameId}/production`, { headers });
     if (r.ok) {
@@ -129,8 +138,16 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     }
   }, [gameId, isGM, viewAsFactionId]);
 
+  const loadFlightGroups = useCallback(async () => {
+    if (isGM) return;
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/flight-groups`, { headers });
+    if (r.ok) setFlightGroups(await r.json());
+  }, [gameId, isGM]);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadProduction(); }, [loadProduction]);
+  useEffect(() => { loadFlightGroups(); }, [loadFlightGroups]);
 
   // Keep detail panel in sync when hexes refresh (e.g. after GM +/- unit)
   useEffect(() => {
@@ -181,6 +198,10 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setBuildStructureType('');
       setBridgeBuildMode(false);
       setBridgeBuildPicks([]);
+      setFlightGroupMode(false);
+      setFlightGroupPath([]);
+      setFlightGroupTargetQ(null);
+      setFlightGroupTargetR(null);
       setCurrentOrders([]);
       fetchOrders(unit?.id ?? null);
     }
@@ -188,7 +209,16 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   // Called when a hex is clicked during move, bombard, build, or bridgeBuild mode
   const handleModeClick = useCallback((hex) => {
-    if (moveMode) {
+    if (flightGroupMode) {
+      const needsTarget = ['bombing_run', 'attack_run'].includes(flightGroupMission);
+      // First click sets target (if needed), subsequent clicks build the path
+      if (needsTarget && flightGroupTargetQ === null) {
+        setFlightGroupTargetQ(hex.hex_q);
+        setFlightGroupTargetR(hex.hex_r);
+      } else {
+        setFlightGroupPath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
+      }
+    } else if (moveMode) {
       setMovePath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
     } else if (bombardMode) {
       setBombardTarget({ q: hex.hex_q, r: hex.hex_r });
@@ -218,7 +248,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
         setBridgeBuildPicks([waterPick, { q: hex.hex_q, r: hex.hex_r }]);
       }
     }
-  }, [moveMode, bombardMode, buildMode, bridgeBuildMode, bridgeBuildPicks, selected, hexes]);
+  }, [flightGroupMode, flightGroupMission, flightGroupTargetQ, moveMode, bombardMode, buildMode, bridgeBuildMode, bridgeBuildPicks, selected, hexes]);
 
   const enterMoveMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -436,6 +466,66 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
   }, [selectedUnit, bridgeBuildPicks, gameId, viewAsFactionId, fetchOrders]);
 
+  const enterFlightGroupMode = useCallback((missionType) => {
+    if (!selectedUnit) return;
+    setFlightGroupMission(missionType);
+    setFlightGroupPath([]);
+    setFlightGroupTargetQ(null);
+    setFlightGroupTargetR(null);
+    setFlightGroupMsg('');
+    setFlightGroupMode(true);
+  }, [selectedUnit]);
+
+  const cancelFlightGroup = useCallback(() => {
+    setFlightGroupMode(false);
+    setFlightGroupPath([]);
+    setFlightGroupTargetQ(null);
+    setFlightGroupTargetR(null);
+    setFlightGroupMsg('');
+  }, []);
+
+  const confirmFlightGroup = useCallback(async () => {
+    if (!selectedUnit) return;
+    const needsTarget = ['bombing_run', 'attack_run'].includes(flightGroupMission);
+    if (needsTarget && (flightGroupTargetQ === null)) {
+      setFlightGroupMsg('Pick a target hex first.');
+      return;
+    }
+    if (!flightGroupPath.length) {
+      setFlightGroupMsg('Draw a flight path on the map first.');
+      return;
+    }
+    const headers = await authHeader();
+    const body = {
+      mission_type: flightGroupMission,
+      path: flightGroupPath,
+      unit_ids: [selectedUnit.id],
+      ...(needsTarget ? { target_hex_q: flightGroupTargetQ, target_hex_r: flightGroupTargetR } : {}),
+    };
+    const r = await fetch(`${SERVER}/api/map/${gameId}/flight-groups`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      setFlightGroupMode(false);
+      setFlightGroupPath([]);
+      setFlightGroupTargetQ(null);
+      setFlightGroupTargetR(null);
+      setFlightGroupMsg('Mission planned.');
+      await loadFlightGroups();
+    } else {
+      const d = await r.json();
+      setFlightGroupMsg(d.error ?? 'Failed to create flight group.');
+    }
+  }, [selectedUnit, flightGroupMission, flightGroupPath, flightGroupTargetQ, flightGroupTargetR, gameId, loadFlightGroups]);
+
+  const cancelFlightGroupById = useCallback(async (groupId) => {
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/flight-groups/${groupId}`, { method: 'DELETE', headers });
+    if (r.ok) await loadFlightGroups();
+  }, [gameId, loadFlightGroups]);
+
   const orderProduction = useCallback(async (unitTypeName, qty, factoryQ, factoryR) => {
     setProdMsg('');
     const headers = await authHeader();
@@ -468,8 +558,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               movePath={movePath}
               bombardMode={bombardMode}
               bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
-              buildMode={buildMode || bridgeBuildMode}
-              buildTargetKey={buildTarget ? `${buildTarget.q},${buildTarget.r}` : null}
+              buildMode={buildMode || bridgeBuildMode || flightGroupMode}
+              buildTargetKey={
+                buildTarget ? `${buildTarget.q},${buildTarget.r}` :
+                (flightGroupTargetQ !== null ? `${flightGroupTargetQ},${flightGroupTargetR}` : null)
+              }
               onPathClick={handleModeClick}
             />
         }
@@ -519,6 +612,17 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               productionQueue={productionQueue}
               prodMsg={prodMsg}
               onOrderProduction={orderProduction}
+              flightGroups={flightGroups}
+              flightGroupMode={flightGroupMode}
+              flightGroupMission={flightGroupMission}
+              flightGroupPath={flightGroupPath}
+              flightGroupTargetQ={flightGroupTargetQ}
+              flightGroupTargetR={flightGroupTargetR}
+              flightGroupMsg={flightGroupMsg}
+              onEnterFlightGroupMode={enterFlightGroupMode}
+              onConfirmFlightGroup={confirmFlightGroup}
+              onCancelFlightGroup={cancelFlightGroup}
+              onCancelFlightGroupById={cancelFlightGroupById}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -575,6 +679,17 @@ function HexDetail({
   productionQueue = [],
   prodMsg = '',
   onOrderProduction,
+  flightGroups = [],
+  flightGroupMode = false,
+  flightGroupMission = 'sweep',
+  flightGroupPath = [],
+  flightGroupTargetQ = null,
+  flightGroupTargetR = null,
+  flightGroupMsg = '',
+  onEnterFlightGroupMode,
+  onConfirmFlightGroup,
+  onCancelFlightGroup,
+  onCancelFlightGroupById,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -726,6 +841,24 @@ function HexDetail({
               currentOrders={currentOrders}
               isContested={isContested}
               hasRepairFacility={hasRepairFacility}
+            />
+          )}
+
+          {/* Flight group panel (players only, air units) */}
+          {(!isGM || viewingAsFaction) && (
+            <FlightGroupPanel
+              selectedUnit={selectedUnit}
+              flightGroups={flightGroups}
+              flightGroupMode={flightGroupMode}
+              flightGroupMission={flightGroupMission}
+              flightGroupPath={flightGroupPath}
+              flightGroupTargetQ={flightGroupTargetQ}
+              flightGroupTargetR={flightGroupTargetR}
+              flightGroupMsg={flightGroupMsg}
+              onEnterFlightGroupMode={onEnterFlightGroupMode}
+              onConfirmFlightGroup={onConfirmFlightGroup}
+              onCancelFlightGroup={onCancelFlightGroup}
+              onCancelFlightGroupById={onCancelFlightGroupById}
             />
           )}
 
@@ -1328,6 +1461,173 @@ function GMBuildingEditor({ hex, gameId, onRefresh }) {
       </div>
 
       {msg && <p style={{ color: '#94a3b8', fontSize: 11, marginTop: 6 }}>{msg}</p>}
+    </div>
+  );
+}
+
+const MISSION_LABELS = {
+  sweep:       'Sweep (fighters only — air superiority)',
+  scout:       'Scout (Scout Plane + optional escort)',
+  bombing_run: 'Bombing Run (bombers — land/naval targets)',
+  attack_run:  'Attack Run (bombers — naval target)',
+};
+
+const MISSION_COLORS = {
+  sweep:       '#6366f1',
+  scout:       '#0ea5e9',
+  bombing_run: '#c2410c',
+  attack_run:  '#b45309',
+};
+
+function FlightGroupPanel({
+  selectedUnit,
+  flightGroups,
+  flightGroupMode,
+  flightGroupMission,
+  flightGroupPath,
+  flightGroupTargetQ,
+  flightGroupTargetR,
+  flightGroupMsg,
+  onEnterFlightGroupMode,
+  onConfirmFlightGroup,
+  onCancelFlightGroup,
+  onCancelFlightGroupById,
+}) {
+  const [newMission, setNewMission] = useState('sweep');
+  const isAirUnit = selectedUnit?.tags?.includes('air');
+  const isBomber = selectedUnit?.tags?.includes('heavy');
+  const hasMissions = flightGroups.length > 0;
+  const needsTarget = ['bombing_run', 'attack_run'].includes(flightGroupMission);
+
+  if (!isAirUnit && !hasMissions) return null;
+
+  const iS = {
+    background: '#0f172a', border: '1px solid #1e293b', borderRadius: 3,
+    padding: '4px 6px', color: '#e2e8f0', fontSize: 12, width: '100%', boxSizing: 'border-box',
+  };
+
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
+      <p style={{ color: '#64748b', fontSize: 11, marginBottom: 8 }}>Air Missions (this turn)</p>
+
+      {/* Existing flight groups */}
+      {hasMissions && (
+        <div style={{ marginBottom: 10 }}>
+          {flightGroups.map(g => (
+            <div key={g.id} style={{
+              background: '#0f172a', border: `1px solid ${MISSION_COLORS[g.mission_type] ?? '#374151'}`,
+              borderRadius: 4, padding: '6px 8px', marginBottom: 6,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ color: MISSION_COLORS[g.mission_type] ?? '#94a3b8', fontSize: 12, fontWeight: 700 }}>
+                  {g.mission_type.replace(/_/g, ' ').toUpperCase()}
+                </span>
+                {(g.target_hex_q != null) && (
+                  <span style={{ color: '#64748b', fontSize: 11 }}> → ({g.target_hex_q},{g.target_hex_r})</span>
+                )}
+                <span style={{ color: '#475569', fontSize: 11, marginLeft: 6 }}>
+                  {g.unit_ids?.length ?? 0} unit{(g.unit_ids?.length ?? 0) !== 1 ? 's' : ''}
+                </span>
+                <span style={{
+                  marginLeft: 6, padding: '1px 5px', borderRadius: 3, fontSize: 10,
+                  background: g.status === 'pending' ? '#1e3a5f' : g.status === 'destroyed' ? '#7f1d1d' : '#1a2e1a',
+                  color: g.status === 'pending' ? '#93c5fd' : g.status === 'destroyed' ? '#fca5a5' : '#6ee7b7',
+                }}>
+                  {g.status}
+                </span>
+              </div>
+              {g.status === 'pending' && (
+                <button
+                  onClick={() => onCancelFlightGroupById?.(g.id)}
+                  style={{ border: 'none', borderRadius: 3, background: '#7f1d1d', color: '#fca5a5', fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
+                >✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Plan a new mission (air units only) */}
+      {isAirUnit && !flightGroupMode && (
+        <div>
+          <div style={{ marginBottom: 6 }}>
+            <select style={iS} value={newMission} onChange={e => setNewMission(e.target.value)}>
+              {Object.entries(MISSION_LABELS)
+                .filter(([m]) => {
+                  if (isBomber && m === 'sweep') return false; // Sweep is fighters only
+                  if (!isBomber && ['bombing_run', 'attack_run'].includes(m)) return false;
+                  return true;
+                })
+                .map(([m, label]) => (
+                  <option key={m} value={m}>{label}</option>
+                ))
+              }
+            </select>
+          </div>
+          <button
+            style={{
+              border: 'none', borderRadius: 4, padding: '5px 12px',
+              background: MISSION_COLORS[newMission] ?? '#6366f1',
+              color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+            onClick={() => onEnterFlightGroupMode?.(newMission)}
+          >
+            Plan Mission…
+          </button>
+        </div>
+      )}
+
+      {/* Flight group path planning mode */}
+      {flightGroupMode && (
+        <div>
+          <div style={{
+            background: '#0c1a2e', border: `1px solid ${MISSION_COLORS[flightGroupMission] ?? '#6366f1'}`,
+            borderRadius: 4, padding: 8, marginBottom: 8,
+          }}>
+            <p style={{ color: MISSION_COLORS[flightGroupMission] ?? '#6366f1', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+              {flightGroupMission.replace(/_/g, ' ').toUpperCase()}
+            </p>
+            {needsTarget && flightGroupTargetQ === null && (
+              <p style={{ color: '#fbbf24', fontSize: 11 }}>Step 1: Click the target hex on the map.</p>
+            )}
+            {needsTarget && flightGroupTargetQ !== null && (
+              <p style={{ color: '#86efac', fontSize: 11 }}>Target: ({flightGroupTargetQ},{flightGroupTargetR}). Now click hexes to draw flight path.</p>
+            )}
+            {!needsTarget && (
+              <p style={{ color: '#fbbf24', fontSize: 11 }}>Click hexes on the map to draw the flight path. {flightGroupPath.length} hex{flightGroupPath.length !== 1 ? 'es' : ''} plotted.</p>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              style={{
+                border: 'none', borderRadius: 4, padding: '5px 12px',
+                background: flightGroupPath.length > 0 ? '#15803d' : '#1e293b',
+                color: flightGroupPath.length > 0 ? '#fff' : '#475569',
+                fontSize: 12, fontWeight: 600,
+                cursor: flightGroupPath.length > 0 ? 'pointer' : 'default',
+              }}
+              disabled={!flightGroupPath.length}
+              onClick={onConfirmFlightGroup}
+            >
+              Confirm Mission
+            </button>
+            <button
+              style={{ border: 'none', borderRadius: 4, padding: '5px 12px', background: '#374151', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+              onClick={onCancelFlightGroup}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {flightGroupMsg && (
+        <p style={{ color: flightGroupMsg.startsWith('Mission') ? '#22c55e' : '#ef4444', fontSize: 11, marginTop: 6 }}>
+          {flightGroupMsg}
+        </p>
+      )}
     </div>
   );
 }

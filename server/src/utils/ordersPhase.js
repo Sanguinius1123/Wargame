@@ -48,9 +48,8 @@ export async function processEndOfPhase3(db, gameId, turn, movedUnitIds = new Se
     .eq('turn', turn)
     .eq('order_type', 'fortify');
 
-  if (ordersError || !fortifyOrders || fortifyOrders.length === 0) {
-    return { fortified, cleared };
-  }
+  if (ordersError) return { fortified, cleared, error: ordersError.message };
+  if (!fortifyOrders || fortifyOrders.length === 0) return { fortified, cleared };
 
   // ------------------------------------------------------------------
   // Step 3: Load all units for the game to build a hex → factions map.

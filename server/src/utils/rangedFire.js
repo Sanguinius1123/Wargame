@@ -34,6 +34,15 @@ function roll2d6() {
   return Math.ceil(Math.random() * 6) + Math.ceil(Math.random() * 6);
 }
 
+// Effective combat count for a unit (pass unit_type_config as cfg).
+// Bombers (heavy tag): ceil(hp/3) — each 3 HP = 1 aircraft with 1 die.
+// Naval/other HP units: quantity (ships count as 1 each regardless of HP).
+// Ground/Fighters: quantity.
+function effectiveCount(unit, cfg) {
+  if (unit.hp != null && cfg?.tags?.includes('heavy')) return Math.ceil(unit.hp / 3);
+  return (unit.quantity ?? 1);
+}
+
 import { hexDist } from './hexGeometry.js';
 
 // ---------------------------------------------------------------------------
@@ -302,9 +311,9 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
       }
     }
 
-    // Total dice for this firer: quantity dice vs units + quantity dice vs infra.
-    // Artillery fires 1 die per unit in the stack.
-    const diceCount = unit.quantity;
+    // Total dice: 1 die per effective unit in the stack.
+    // Artillery: 1 die per gun. Bombers: ceil(hp/3). Naval: quantity.
+    const diceCount = effectiveCount(unit, cfg);
     const toHit = cfg.bombard_to_hit;
     const pen = cfg.bombard_pen ?? 0;
 
@@ -313,8 +322,8 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     const unitCasualtiesThisBombard = new Map();
 
     if (unitsInTargetHex.length > 0 && diceCount > 0) {
-      // Distribute dice among target units proportionally by quantity.
-      const targets = unitsInTargetHex.map((u) => ({ id: u.id, weight: u.quantity }));
+      // Distribute dice among target units proportionally by effective count.
+      const targets = unitsInTargetHex.map((u) => ({ id: u.id, weight: effectiveCount(u, unitTypeById.get(u.unit_type_id)) }));
       const dicePerTarget = distributeDice(diceCount, targets);
 
       for (const targetUnit of unitsInTargetHex) {
@@ -436,14 +445,15 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     if (enemyTargets.length === 0) continue;
 
     // Proportional fire: weight = unit_count / distance.
-    // Each firing unit contributes `quantity` dice total.
-    const totalDice = unit.quantity;
+    // Each firing unit contributes effectiveCount dice total.
+    const totalDice = effectiveCount(unit, cfg);
 
     const weightedTargets = enemyTargets.map((target) => {
+      const targetCfgForCount = unitTypeById.get(target.unit_type_id);
       const dist = hexDist(unit.hex_q, unit.hex_r, target.hex_q, target.hex_r);
       return {
         id: target.id,
-        weight: target.quantity / dist,
+        weight: effectiveCount(target, targetCfgForCount) / dist,
       };
     });
 
