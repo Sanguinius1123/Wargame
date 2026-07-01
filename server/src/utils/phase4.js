@@ -331,6 +331,83 @@ export async function checkWinCondition(db, gameId) {
 }
 
 // ---------------------------------------------------------------------------
+// Air emergency scramble — run as FIRST step of Phase 4 (before repair).
+// Parked air units at a captured airbase (enemy-owned) either scramble to a
+// friendly landing site or are destroyed.
+// ---------------------------------------------------------------------------
+export async function processAirEmergencyScramble(db, gameId) {
+  let scrambled = 0;
+  let destroyed = 0;
+
+  const { data: airUnits } = await db
+    .from('units')
+    .select('id, faction_id, hex_q, hex_r, unit_type_config(move, tags)')
+    .eq('game_id', gameId);
+
+  const eligibleAirUnits = (airUnits ?? []).filter(u =>
+    u.unit_type_config?.tags?.includes('air')
+  );
+
+  if (!eligibleAirUnits.length) return { scrambled: 0, destroyed: 0 };
+
+  // Load all operational buildings once to avoid N+1 queries
+  const { data: allBuildings } = await db
+    .from('buildings')
+    .select('hex_q, hex_r, type, owner_faction_id, current_hp')
+    .eq('game_id', gameId)
+    .gte('current_hp', 1);
+
+  for (const unit of eligibleAirUnits) {
+    const capturedBase = (allBuildings ?? []).find(b =>
+      b.type === 'airbase'
+      && b.hex_q === unit.hex_q
+      && b.hex_r === unit.hex_r
+      && b.owner_faction_id != null
+      && b.owner_faction_id !== unit.faction_id
+    );
+
+    if (!capturedBase) continue;
+
+    const roll = Math.ceil(Math.random() * 6);
+
+    if (roll >= 4) {
+      const friendlyBases = (allBuildings ?? []).filter(b =>
+        (b.type === 'airbase' || b.type === 'airstrip')
+        && b.owner_faction_id === unit.faction_id
+      );
+
+      const maxRange = unit.unit_type_config?.move ?? 30;
+      let nearest = null;
+      let nearestDist = Infinity;
+
+      for (const base of friendlyBases) {
+        const d = hexDist(unit.hex_q, unit.hex_r, base.hex_q, base.hex_r);
+        if (d <= maxRange && d < nearestDist) {
+          nearestDist = d;
+          nearest = base;
+        }
+      }
+
+      if (nearest) {
+        await db.from('units')
+          .update({ hex_q: nearest.hex_q, hex_r: nearest.hex_r })
+          .eq('id', unit.id);
+        scrambled++;
+      } else {
+        // Rolled success but no friendly base within movement range
+        await db.from('units').delete().eq('id', unit.id);
+        destroyed++;
+      }
+    } else {
+      await db.from('units').delete().eq('id', unit.id);
+      destroyed++;
+    }
+  }
+
+  return { scrambled, destroyed };
+}
+
+// ---------------------------------------------------------------------------
 // 5. processRepairOrders
 // Naval at Harbor, air at Airbase — repair 1 HP, costs ceil(mat/4) + ceil(man/4).
 // ---------------------------------------------------------------------------
@@ -482,6 +559,9 @@ export async function resetTurnReady(db, gameId) {
 // runPhase4 — convenience wrapper for advance-turn
 // ---------------------------------------------------------------------------
 export async function runPhase4(db, gameId, currentTurn) {
+  // Air return is the first Phase 4 step per DESIGN.md.
+  const scrambleResult = await processAirEmergencyScramble(db, gameId);
+
   // Repair and build both deduct faction resources — must be sequential to avoid read-modify-write races.
   const repairResult = await processRepairOrders(db, gameId, currentTurn);
   const buildResult  = await processBuildOrders(db, gameId, currentTurn);
@@ -498,6 +578,8 @@ export async function runPhase4(db, gameId, currentTurn) {
   await resetTurnReady(db, gameId);
 
   return {
+    scrambled: scrambleResult.scrambled,
+    destroyed_on_scramble: scrambleResult.destroyed,
     materials_collected: materials.collected,
     units_placed: production.placed,
     units_repaired: repairResult.repaired,

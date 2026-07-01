@@ -379,6 +379,17 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
   }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
 
+  const setPatrolOrder = useCallback(async (patrolValue) => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/units/${selectedUnit.id}/standing-order`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ standing_order: patrolValue }),
+    });
+    await load();
+  }, [selectedUnit, gameId, load]);
+
   const repairUnit = useCallback(async () => {
     if (!selectedUnit) return;
     const headers = await authHeader();
@@ -623,6 +634,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onConfirmFlightGroup={confirmFlightGroup}
               onCancelFlightGroup={cancelFlightGroup}
               onCancelFlightGroupById={cancelFlightGroupById}
+              onSetPatrol={setPatrolOrder}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -690,6 +702,7 @@ function HexDetail({
   onConfirmFlightGroup,
   onCancelFlightGroup,
   onCancelFlightGroupById,
+  onSetPatrol,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -841,6 +854,7 @@ function HexDetail({
               currentOrders={currentOrders}
               isContested={isContested}
               hasRepairFacility={hasRepairFacility}
+              onSetPatrol={onSetPatrol}
             />
           )}
 
@@ -1050,6 +1064,7 @@ function OrderPanel({
   currentOrders,
   isContested,
   hasRepairFacility = false,
+  onSetPatrol,
 }) {
   const [pendingBuildType, setPendingBuildType] = useState('');
 
@@ -1234,6 +1249,20 @@ function OrderPanel({
                   onClick={onEnterBombardMode}
                 >
                   Bombard
+                </button>
+              )}
+              {!isSupply && (
+                <button
+                  style={{
+                    ...BTN.base,
+                    background: unit.standing_order === 'patrol' ? '#312e81' : '#1e293b',
+                    color: unit.standing_order === 'patrol' ? '#a5b4fc' : '#94a3b8',
+                    border: unit.standing_order === 'patrol' ? '1px solid #6366f1' : '1px solid #374151',
+                  }}
+                  title="Patrol: Unit intercepts enemies entering its zone each turn. Radius 1 (foot) or 2 (mechanized). Air units use flight group patrol. Persists until cancelled."
+                  onClick={() => onSetPatrol(unit.standing_order === 'patrol' ? null : 'patrol')}
+                >
+                  {unit.standing_order === 'patrol' ? 'Patrolling ✓' : 'Patrol'}
                 </button>
               )}
 

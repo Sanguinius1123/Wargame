@@ -16,7 +16,23 @@
 // the cost would exceed budget; this lets a unit always enter an adjacent hex.
 // =============================================================
 
-import { isAdjacent } from './hexGeometry.js';
+import { isAdjacent, hexDist, hexesInRange } from './hexGeometry.js';
+
+// ---------------------------------------------------------------------------
+// Dice helpers (kept inline — movement.js is self-contained).
+// ---------------------------------------------------------------------------
+function roll2d6() {
+  return Math.ceil(Math.random() * 6) + Math.ceil(Math.random() * 6);
+}
+
+// Detection roll-under check.
+// Returns true if the moving unit is detected by the patrol.
+function detectionCheck(detRating, stealthRating, distance) {
+  const score = 7 + detRating - stealthRating - distance;
+  if (score > 12) return true;
+  if (score < 2) return false;
+  return roll2d6() <= score;
+}
 
 // ---------------------------------------------------------------------------
 // Cost to enter a single hex for a given unit type.
@@ -119,6 +135,281 @@ export function validatePath(unitType, path, hexesByKey) {
 }
 
 // ---------------------------------------------------------------------------
+// runPatrolIntercepts
+//
+// After validMoves is built, check each destination hex against enemy patrol
+// zones. If a patrol unit detects the mover and wins (or ties) combat, the
+// move is cancelled. The patrol unit is physically moved to the intercepted
+// hex in the DB.
+//
+// Parameters:
+//   db           — Supabase client
+//   gameId       — UUID string
+//   turn         — current turn number
+//   validMoves   — array of { unitId, finalQ, finalR, unit } objects (mutated in-place via cancelledMoves)
+//   unitPathMap  — Map<unitId, { unit, unitType }> for moving unit config lookup
+//
+// Returns:
+//   {
+//     cancelledMoves : Set<unitId>  — unit IDs whose moves were cancelled
+//     patrolUpdates  : Array        — { id, hex_q, hex_r, quantity, destroyed } for DB writes
+//     combatLogRows  : Array        — rows to insert into combat_log
+//     patrolIntercepts : number     — count of intercepts that actually fired
+//     errors         : string[]
+//   }
+// ---------------------------------------------------------------------------
+async function runPatrolIntercepts(db, gameId, turn, validMoves, unitPathMap) {
+  const cancelledMoves = new Set();
+  const patrolUpdates = [];   // { id, hex_q, hex_r, quantity, destroyed }
+  const combatLogRows = [];
+  const errors = [];
+  let patrolIntercepts = 0;
+
+  // -----------------------------------------------------------------------
+  // 1. Load all ground patrol units from enemy factions.
+  //    We need: id, faction_id, unit_type_id, hex_q, hex_r, quantity, standing_order.
+  //    Also load their unit_type_config inline.
+  //    Filter: standing_order = 'patrol', no 'air' or 'naval' tags.
+  // -----------------------------------------------------------------------
+  const { data: patrolRows, error: patrolErr } = await db
+    .from('units')
+    .select(`
+      id,
+      faction_id,
+      unit_type_id,
+      hex_q,
+      hex_r,
+      quantity,
+      standing_order,
+      unit_type_config!inner (
+        id,
+        name,
+        tags,
+        move,
+        to_hit,
+        defense,
+        penetration,
+        detection_rating,
+        stealth_rating
+      )
+    `)
+    .eq('game_id', gameId)
+    .eq('standing_order', 'patrol');
+
+  if (patrolErr) {
+    errors.push(`Patrol intercept: failed to load patrol units — ${patrolErr.message}`);
+    return { cancelledMoves, patrolUpdates, combatLogRows, patrolIntercepts, errors };
+  }
+
+  if (!patrolRows || patrolRows.length === 0) {
+    return { cancelledMoves, patrolUpdates, combatLogRows, patrolIntercepts, errors };
+  }
+
+  // Filter to ground-only patrol units (no 'air' or 'naval' tag).
+  const groundPatrols = patrolRows.filter((p) => {
+    const tags = p.unit_type_config?.tags ?? [];
+    return !tags.includes('air') && !tags.includes('naval');
+  });
+
+  if (groundPatrols.length === 0) {
+    return { cancelledMoves, patrolUpdates, combatLogRows, patrolIntercepts, errors };
+  }
+
+  // Build a mutable working copy of each patrol unit's state so we can
+  // track casualties across multiple potential intercepts in the same turn.
+  // Map: patrol unit DB id → working state object
+  const patrolState = new Map();
+  for (const p of groundPatrols) {
+    patrolState.set(p.id, {
+      id: p.id,
+      faction_id: p.faction_id,
+      unit_type_id: p.unit_type_id,
+      hex_q: p.hex_q,
+      hex_r: p.hex_r,
+      quantity: p.quantity,
+      cfg: p.unit_type_config,
+      interceptedHexQ: null,  // set when an intercept fires
+      interceptedHexR: null,
+      destroyed: false,
+      hasIntercepted: false,  // one intercept per turn
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // 2. For each valid move, check if any enemy patrol covers the destination.
+  // -----------------------------------------------------------------------
+  for (const move of validMoves) {
+    if (cancelledMoves.has(move.unitId)) continue; // already cancelled by a prior intercept
+
+    // Get the moving unit's config (we need stealth_rating and combat stats).
+    const moverEntry = unitPathMap.get(move.unitId);
+    if (!moverEntry) continue;
+    const moverUnit = moverEntry.unit;
+    const moverCfg  = moverEntry.unitType; // has: tags, move, to_hit, defense, penetration, stealth_rating
+
+    for (const [, patrol] of patrolState) {
+      // Skip if already used this turn or already destroyed.
+      if (patrol.hasIntercepted || patrol.destroyed) continue;
+
+      // Skip if same faction as mover.
+      if (patrol.faction_id === moverUnit.faction_id) continue;
+
+      // Compute patrol radius: mechanized = 2, foot = 1.
+      const patrolIsMech = Array.isArray(patrol.cfg.tags) && patrol.cfg.tags.includes('mechanized');
+      const radius = patrolIsMech ? 2 : 1;
+
+      // Check if the destination hex is within patrol zone.
+      const patrolZone = hexesInRange(patrol.hex_q, patrol.hex_r, radius);
+      const destKey = `${move.finalQ},${move.finalR}`;
+      if (!patrolZone.has(destKey)) continue;
+
+      // -----------------------------------------------------------------------
+      // 3. Detection check.
+      //    distance = hex distance between patrol and destination.
+      //    MVP: use hex distance as proxy for LOS; full LOS not yet implemented.
+      // -----------------------------------------------------------------------
+      const dist = hexDist(patrol.hex_q, patrol.hex_r, move.finalQ, move.finalR);
+      const detRating   = patrol.cfg.detection_rating ?? 0;
+      const stealthRate = moverCfg.stealth_rating ?? 0;
+
+      const detected = detectionCheck(detRating, stealthRate, dist);
+      if (!detected) continue;
+
+      // -----------------------------------------------------------------------
+      // 4. Combat: both sides fire simultaneously.
+      //    Patrol fires `patrol.quantity` dice at mover.
+      //    Mover fires `moverUnit.quantity` dice at patrol.
+      //    Units with to_hit == null cannot fire.
+      // -----------------------------------------------------------------------
+      patrolIntercepts++;
+      patrol.hasIntercepted = true;
+      patrol.interceptedHexQ = move.finalQ;
+      patrol.interceptedHexR = move.finalR;
+
+      let patrolCas = 0;
+      let moverCas  = 0;
+      const rollLog = [];
+
+      // Patrol fires at mover.
+      if (patrol.cfg.to_hit != null) {
+        for (let i = 0; i < patrol.quantity; i++) {
+          const attackRoll = roll2d6();
+          if (attackRoll <= patrol.cfg.to_hit) {
+            const saveTarget = Math.max(0, (moverCfg.defense ?? 6) - (patrol.cfg.penetration ?? 0));
+            const saveRoll = roll2d6();
+            if (saveRoll > saveTarget) {
+              moverCas++;
+              rollLog.push(`Patrol die ${i + 1}: attack ${attackRoll}/${patrol.cfg.to_hit} HIT, save ${saveRoll}/${saveTarget} CASUALTY`);
+            } else {
+              rollLog.push(`Patrol die ${i + 1}: attack ${attackRoll}/${patrol.cfg.to_hit} HIT, save ${saveRoll}/${saveTarget} SAVED`);
+            }
+          } else {
+            rollLog.push(`Patrol die ${i + 1}: attack ${attackRoll}/${patrol.cfg.to_hit} MISS`);
+          }
+        }
+      } else {
+        rollLog.push(`Patrol unit (${patrol.cfg.name}): no to_hit — cannot fire.`);
+      }
+
+      // Mover fires at patrol simultaneously.
+      if (moverCfg.to_hit != null) {
+        for (let i = 0; i < moverUnit.quantity; i++) {
+          const attackRoll = roll2d6();
+          if (attackRoll <= moverCfg.to_hit) {
+            const saveTarget = Math.max(0, (patrol.cfg.defense ?? 6) - (moverCfg.penetration ?? 0));
+            const saveRoll = roll2d6();
+            if (saveRoll > saveTarget) {
+              patrolCas++;
+              rollLog.push(`Mover die ${i + 1}: attack ${attackRoll}/${moverCfg.to_hit} HIT, save ${saveRoll}/${saveTarget} CASUALTY`);
+            } else {
+              rollLog.push(`Mover die ${i + 1}: attack ${attackRoll}/${moverCfg.to_hit} HIT, save ${saveRoll}/${saveTarget} SAVED`);
+            }
+          } else {
+            rollLog.push(`Mover die ${i + 1}: attack ${attackRoll}/${moverCfg.to_hit} MISS`);
+          }
+        }
+      } else {
+        rollLog.push(`Mover unit (${moverCfg.name}): no to_hit — cannot fire.`);
+      }
+
+      // Apply casualties to local state.
+      patrol.quantity  = Math.max(0, patrol.quantity  - patrolCas);
+      moverUnit.quantity = Math.max(0, moverUnit.quantity - moverCas);
+
+      // -----------------------------------------------------------------------
+      // 5. Determine outcome.
+      //    - Patrol wins  (mover qty → 0): cancel move, mover deleted from DB.
+      //    - Patrol loses (patrol qty → 0): keep move, patrol deleted.
+      //    - Both survive / tie: cancel move, patrol holds the hex.
+      // -----------------------------------------------------------------------
+      const patrolWon  = moverUnit.quantity <= 0;
+      const patrolLost = patrol.quantity <= 0;
+
+      let outcome;
+      if (patrolWon) {
+        outcome = 'patrol_wins';
+        cancelledMoves.add(move.unitId);
+        patrol.destroyed = patrolLost; // could theoretically be mutual
+      } else if (patrolLost) {
+        outcome = 'patrol_loses';
+        patrol.destroyed = true;
+        // Move continues — do NOT add to cancelledMoves.
+      } else {
+        // Both survive.
+        outcome = 'tie';
+        cancelledMoves.add(move.unitId);
+      }
+
+      combatLogRows.push({
+        game_id: gameId,
+        turn,
+        phase: 3,
+        hex_q: move.finalQ,
+        hex_r: move.finalR,
+        log_type: 'ground_patrol_intercept',
+        faction_id: patrol.faction_id,
+        data: {
+          patrol_unit_id:   patrol.id,
+          patrol_faction:   patrol.faction_id,
+          patrol_type:      patrol.cfg.name,
+          mover_unit_id:    move.unitId,
+          mover_faction:    moverUnit.faction_id,
+          mover_type:       moverCfg.name,
+          detected:         true,
+          distance:         dist,
+          patrol_cas:       patrolCas,
+          mover_cas:        moverCas,
+          patrol_qty_after: patrol.quantity,
+          mover_qty_after:  moverUnit.quantity,
+          outcome,
+          roll_log:         rollLog,
+        },
+      });
+
+      // Once this move is cancelled we can stop checking more patrols for it.
+      if (cancelledMoves.has(move.unitId)) break;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // 6. Collect DB updates for all patrols that actually intercepted.
+  // -----------------------------------------------------------------------
+  for (const [, patrol] of patrolState) {
+    if (!patrol.hasIntercepted) continue;
+
+    patrolUpdates.push({
+      id:         patrol.id,
+      hex_q:      patrol.interceptedHexQ,
+      hex_r:      patrol.interceptedHexR,
+      quantity:   patrol.quantity,
+      destroyed:  patrol.destroyed,
+    });
+  }
+
+  return { cancelledMoves, patrolUpdates, combatLogRows, patrolIntercepts, errors };
+}
+
+// ---------------------------------------------------------------------------
 // executeGroundMoves
 //
 // Executes all ground movement orders for a given game and turn in Phase 3.
@@ -127,10 +418,11 @@ export function validatePath(unitType, path, hexesByKey) {
 //   2. Build each unit's path from ordered sequences (sequence 0 = start hex, then waypoints).
 //   3. Load all hexes with their terrain config.
 //   4. Validate each path; skip invalid ones (logged to errors).
-//   5. Update unit positions to the final hex of their valid path.
-//   6. Merge stacks that share (faction_id, unit_type_id, hex_q, hex_r).
+//   4b. Ground patrol intercept pass (detection + combat; cancels intercepted moves).
+//   5. Update unit positions to the final hex of their valid (non-cancelled) path.
+//   7. Merge stacks that share (faction_id, unit_type_id, hex_q, hex_r).
 //
-// Returns { moved: number, skipped: number, errors: string[] }
+// Returns { moved: number, skipped: number, errors: string[], movedUnitIds: Set, patrolIntercepts: number }
 // ---------------------------------------------------------------------------
 export async function executeGroundMoves(db, gameId, turn) {
   const errors = [];
@@ -162,7 +454,12 @@ export async function executeGroundMoves(db, gameId, turn) {
           id,
           name,
           tags,
-          move
+          move,
+          to_hit,
+          defense,
+          penetration,
+          stealth_rating,
+          detection_rating
         )
       )
     `)
@@ -208,12 +505,15 @@ export async function executeGroundMoves(db, gameId, turn) {
 
   // Sort each unit's waypoints by sequence and build full path.
   const unitPaths = [];
+  // unitPathMap: Map<unitId, { unit, unitType }> — for patrol intercept lookups.
+  const unitPathMap = new Map();
   for (const [unitId, entry] of unitOrdersMap) {
     entry.waypoints.sort((a, b) => a.sequence - b.sequence);
     // Waypoints already include the start hex at sequence 0 (sent by the client).
     // Do NOT prepend unit.hex_q/r again — that would double the start hex.
     const path = entry.waypoints.map((w) => ({ q: w.q, r: w.r }));
     unitPaths.push({ unitId, unit: entry.unit, unitType: entry.unitType, path });
+    unitPathMap.set(unitId, { unit: entry.unit, unitType: entry.unitType });
   }
 
   // ------------------------------------------------------------------
@@ -250,9 +550,9 @@ export async function executeGroundMoves(db, gameId, turn) {
   }
 
   // ------------------------------------------------------------------
-  // 4 + 5. Validate paths and collect valid moves; apply them.
+  // 4. Validate paths and collect valid moves.
   // ------------------------------------------------------------------
-  const validMoves = []; // { unitId, finalQ, finalR }
+  const validMoves = []; // { unitId, finalQ, finalR, unit }
 
   for (const { unitId, unit, unitType, path } of unitPaths) {
     const result = validatePath(unitType, path, hexesByKey);
@@ -271,11 +571,72 @@ export async function executeGroundMoves(db, gameId, turn) {
     });
   }
 
-  // Apply position updates.
+  // ------------------------------------------------------------------
+  // 4b. Ground patrol intercept pass.
+  //     Run before any moves are applied. Cancelled moves are excluded
+  //     from the position-update step below.
+  // ------------------------------------------------------------------
+  let patrolIntercepts = 0;
+  {
+    const interceptResult = await runPatrolIntercepts(
+      db, gameId, turn, validMoves, unitPathMap
+    );
+
+    patrolIntercepts = interceptResult.patrolIntercepts;
+    errors.push(...interceptResult.errors);
+
+    // Apply patrol DB writes: move patrol to intercepted hex, update qty, delete if destroyed.
+    for (const pu of interceptResult.patrolUpdates) {
+      if (pu.destroyed) {
+        const { error } = await db.from('units').delete().eq('id', pu.id);
+        if (error) errors.push(`Patrol intercept: failed to delete destroyed patrol ${pu.id} — ${error.message}`);
+      } else {
+        const { error } = await db
+          .from('units')
+          .update({ hex_q: pu.hex_q, hex_r: pu.hex_r, quantity: pu.quantity })
+          .eq('id', pu.id);
+        if (error) errors.push(`Patrol intercept: failed to update patrol ${pu.id} — ${error.message}`);
+      }
+    }
+
+    // Delete mover units that were eliminated (patrol_wins outcome).
+    for (const move of validMoves) {
+      if (!interceptResult.cancelledMoves.has(move.unitId)) continue;
+      // Only delete if the mover's quantity was driven to 0 — check working copy.
+      const moverEntry = unitPathMap.get(move.unitId);
+      if (moverEntry && moverEntry.unit.quantity <= 0) {
+        const { error } = await db.from('units').delete().eq('id', move.unitId);
+        if (error) errors.push(`Patrol intercept: failed to delete eliminated mover ${move.unitId} — ${error.message}`);
+      }
+    }
+
+    // Insert combat log rows for all intercepts.
+    if (interceptResult.combatLogRows.length > 0) {
+      const { error: logErr } = await db.from('combat_log').insert(interceptResult.combatLogRows);
+      if (logErr) errors.push(`Patrol intercept: failed to insert combat log — ${logErr.message}`);
+    }
+
+    // Remove cancelled moves so they are NOT processed in step 5.
+    const cancelledMoves = interceptResult.cancelledMoves;
+    for (let i = validMoves.length - 1; i >= 0; i--) {
+      if (cancelledMoves.has(validMoves[i].unitId)) {
+        validMoves.splice(i, 1);
+        skipped++;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 5. Apply position updates for non-cancelled moves.
+  // ------------------------------------------------------------------
   for (const { unitId, finalQ, finalR } of validMoves) {
+    const moverEntry = unitPathMap.get(unitId);
+    const updatePayload = { hex_q: finalQ, hex_r: finalR };
+    // Persist quantity changes from patrol intercept combat (casualties reduce in-memory copy).
+    if (moverEntry?.unit?.quantity != null) updatePayload.quantity = moverEntry.unit.quantity;
     const { error: updateError } = await db
       .from('units')
-      .update({ hex_q: finalQ, hex_r: finalR })
+      .update(updatePayload)
       .eq('id', unitId);
 
     if (updateError) {
@@ -288,7 +649,7 @@ export async function executeGroundMoves(db, gameId, turn) {
   }
 
   // ------------------------------------------------------------------
-  // 6. Merge stacks: for each (faction_id, unit_type_id, hex_q, hex_r)
+  // 7. Merge stacks: for each (faction_id, unit_type_id, hex_q, hex_r)
   //    that now has multiple rows, sum quantities and keep one row.
   //
   //    Strategy: load all units for the game, find duplicates, merge.
@@ -351,5 +712,5 @@ export async function executeGroundMoves(db, gameId, turn) {
     }
   }
 
-  return { moved, skipped, errors, movedUnitIds };
+  return { moved, skipped, errors, movedUnitIds, patrolIntercepts };
 }

@@ -531,4 +531,37 @@ router.get('/:gameId/orders/:unitId', requireAuth, async (req, res) => {
   res.json({ orders: orders ?? [] });
 });
 
+// PATCH /api/map/:gameId/units/:unitId/standing-order
+router.patch('/:gameId/units/:unitId/standing-order', requireAuth, async (req, res) => {
+  const { gameId, unitId } = req.params;
+  const { standing_order } = req.body;
+  const isGM = req.user.global_role === 'gm';
+
+  const validValues = [null, 'patrol'];
+  if (!validValues.includes(standing_order)) {
+    return res.status(400).json({ error: `Invalid standing_order value: ${standing_order}` });
+  }
+
+  const { data: unit } = await adminDb
+    .from('units')
+    .select('id, faction_id, factions(profile_id)')
+    .eq('id', unitId)
+    .eq('game_id', gameId)
+    .single();
+
+  if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+  if (!isGM && unit.factions?.profile_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your unit' });
+  }
+
+  const { error } = await adminDb
+    .from('units')
+    .update({ standing_order: standing_order ?? null })
+    .eq('id', unitId);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
 export default router;
