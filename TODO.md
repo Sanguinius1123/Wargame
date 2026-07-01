@@ -69,7 +69,12 @@
 - **Railroads** — `has_railroad` stub exists. Fast ground movement, expensive to build.
 - **Supply lines** — full supply radius + Supply unit starvation rules
 - **Allied vision sharing** — share current visibility (not scouted memory) between allied factions
-- **Victory condition tuning** — per player count, alternative win types
+- **Control point win condition** — hold-N-control-points mode; `control_point` building type already added; wire into win condition check as an alternative to settlement majority
+- **VP accumulation mode** — continuous scoring by holding objectives; alternative win condition for timed scenarios
+- **Unit veterancy** — surviving units earn XP from combat, unlock stat bonuses; trains players to care about their units (e.g. after N kills: +1 to_hit or +1 defense; stored as `veteran_level` column on units; 3 tiers)
+- **Large-map performance overhaul** — canvas renderer to replace SVG (10k+ hexes); server-side viewport filtering on GET /hexes (only send visible+scouted hexes in current viewport); local cache of revealed/scouted hex terrain that persists across map loads (only re-fetch changed hexes or newly visible ones); 40×40 works fine for now, this is needed for 100×100+
+- **Politics / diplomacy / alliances** — faction relationships, stance system, intrigue; tracked in `faction_relationships` table; see parent ScifiRNR project for design reference
+- **Weather events** — random or GM-triggered weather zones that affect LOS/movement/combat; snowstorm = -2 LOS, mud = 1.5× terrain cost, clear = normal; implemented as a per-hex or per-region modifier for the turn
 - **Flight group turn-around rules** — abort mission at X% casualties if movement allows
 - **Emergency landing rules** — air units with no reachable airstrip
 - **Skirmish orders** — Hold and Retreat sub-modes for standing orders

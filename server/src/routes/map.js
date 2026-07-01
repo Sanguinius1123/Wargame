@@ -96,10 +96,18 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
 
   await markScouted(adminDb, faction.id, gameId, visible, game?.current_turn ?? 0);
 
+  const playerFactionId = faction.id;
+
   res.json(hexes.map(h => {
     const k = `${h.hex_q},${h.hex_r}`;
     if (visible.has(k)) {
-      return { ...h, units: unitsByHex[k] ?? [], buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
+      const allUnits = unitsByHex[k] ?? [];
+      // For enemy units, strip to type + stack size only (fog of war on unit stats)
+      const sanitizedUnits = allUnits.map(u => {
+        if (u.factionId === playerFactionId) return u;
+        return { id: u.id, type: u.type, tags: u.tags, quantity: u.quantity, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor };
+      });
+      return { ...h, units: sanitizedUnits, buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
     }
     if (scouted.has(k)) {
       return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [], buildings: [] };
@@ -109,8 +117,10 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
 });
 
 // GET /api/map/:gameId/hexes/:q/:r — single hex detail
+// GM: full unit stats. Players: own units full, enemy units type+quantity only.
 router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
   const { gameId, q, r } = req.params;
+  const isGM = req.user.global_role === 'gm';
 
   const { data: hex } = await adminDb
     .from('hexes')
@@ -129,7 +139,26 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
     .eq('hex_q', q)
     .eq('hex_r', r);
 
-  res.json({ ...hex, units: units ?? [] });
+  if (isGM) return res.json({ ...hex, units: units ?? [] });
+
+  // Player: find their faction, strip stats from enemy units
+  const { data: playerFaction } = await adminDb
+    .from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).maybeSingle();
+  const playerFactionId = playerFaction?.id;
+
+  const sanitized = (units ?? []).map(u => {
+    if (!playerFactionId || u.faction_id === playerFactionId) return u;
+    return {
+      id: u.id,
+      quantity: u.quantity,
+      hp: u.hp,
+      faction_id: u.faction_id,
+      factions: u.factions,
+      unit_type_config: { name: u.unit_type_config?.name, tags: u.unit_type_config?.tags },
+    };
+  });
+
+  res.json({ ...hex, units: sanitized });
 });
 
 // PATCH /api/map/:gameId/hexes/:q/:r — GM edits a hex
@@ -190,47 +219,76 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
 });
 
 // POST /api/map/:gameId/orders — player queues orders for a unit
-// Body: { unit_id, order_type, to_hex_q?, to_hex_r?, target_hex_q?, target_hex_r?, path?, asFactionId? }
+// Body: { unit_id, order_type, to_hex_q?, to_hex_r?, target_hex_q?, target_hex_r?, path?, asFactionId?,
+//         split_quantity? }
+// split_quantity: if present, splits N units off into a new stack and applies the move path to that new stack.
 // path is an array of {q, r} steps for multi-hex movement; clears previous orders for this unit.
 // asFactionId: GM only — act on behalf of that faction (for testing / "view as player" mode).
 router.post('/:gameId/orders', requireAuth, async (req, res) => {
-  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path, asFactionId, structure_type } = req.body;
+  const { unit_id, order_type = 'move', to_hex_q, to_hex_r, target_hex_q, target_hex_r, path, asFactionId, structure_type, split_quantity } = req.body;
   const isGM = req.user.global_role === 'gm';
+  const gameId = req.params.gameId;
 
   // Verify ownership: GM can act for any faction; players must own the unit
   const { data: unit } = await adminDb
     .from('units')
-    .select('id, faction_id, factions(profile_id)')
+    .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, factions(profile_id)')
     .eq('id', unit_id)
     .single();
 
   if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
   if (isGM) {
-    // GM acting as faction: verify unit belongs to the specified faction
     if (asFactionId && unit.faction_id !== asFactionId) {
       return res.status(403).json({ error: 'Unit does not belong to that faction' });
     }
-    // GM without asFactionId: full access, no restriction
   } else if (unit.factions?.profile_id !== req.user.id) {
     return res.status(403).json({ error: 'Not your unit' });
   }
 
-  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', req.params.gameId).single();
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
   if (!game) return res.status(404).json({ error: 'Game not found' });
   const turn = game.current_turn;
 
-  // Clear existing orders for this unit this turn
-  await adminDb.from('movement_orders').delete().eq('unit_id', unit_id).eq('turn', turn);
+  // Handle stack split: create a new unit row with split_quantity, apply orders to it
+  let targetUnitId = unit_id;
+  if (split_quantity != null) {
+    const n = parseInt(split_quantity, 10);
+    if (!Number.isInteger(n) || n < 1) return res.status(400).json({ error: 'split_quantity must be a positive integer' });
+    if (unit.hp != null) return res.status(400).json({ error: 'HP-based units cannot be split' });
+    if (n >= unit.quantity) return res.status(400).json({ error: 'split_quantity must be less than the stack size' });
+
+    // Reduce original stack
+    const { error: reduceErr } = await adminDb
+      .from('units').update({ quantity: unit.quantity - n }).eq('id', unit_id);
+    if (reduceErr) return res.status(500).json({ error: reduceErr.message });
+
+    // Check if there's already a unit of the same type at the same hex for this faction
+    // (could happen on a re-submit; if so, merge into it instead of creating new)
+    const { data: newUnit, error: createErr } = await adminDb
+      .from('units')
+      .insert({ game_id: gameId, faction_id: unit.faction_id, unit_type_id: unit.unit_type_id, hex_q: unit.hex_q, hex_r: unit.hex_r, quantity: n })
+      .select()
+      .single();
+    if (createErr) {
+      // Roll back the reduction before bailing
+      await adminDb.from('units').update({ quantity: unit.quantity }).eq('id', unit_id);
+      return res.status(500).json({ error: createErr.message });
+    }
+    targetUnitId = newUnit.id;
+  }
+
+  // Clear existing orders for the target unit this turn
+  await adminDb.from('movement_orders').delete().eq('unit_id', targetUnitId).eq('turn', turn);
 
   // Build order rows — path[] for multi-step moves, single row otherwise
   const steps = Array.isArray(path) && path.length > 0
-    ? path.map((step, i) => ({ unit_id, game_id: req.params.gameId, order_type: 'move', sequence: i, to_hex_q: step.q, to_hex_r: step.r, turn }))
-    : [{ unit_id, game_id: req.params.gameId, order_type, sequence: 0, to_hex_q, to_hex_r, target_hex_q, target_hex_r, structure_type: structure_type ?? null, turn }];
+    ? path.map((step, i) => ({ unit_id: targetUnitId, game_id: gameId, order_type: 'move', sequence: i, to_hex_q: step.q, to_hex_r: step.r, turn }))
+    : [{ unit_id: targetUnitId, game_id: gameId, order_type, sequence: 0, to_hex_q, to_hex_r, target_hex_q, target_hex_r, structure_type: structure_type ?? null, turn }];
 
   const { data, error } = await adminDb.from('movement_orders').insert(steps).select();
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json({ orders: data, split_unit_id: split_quantity != null ? targetUnitId : null });
 });
 
 // POST /api/map/:gameId/production — queue unit production at a factory hex
@@ -562,6 +620,36 @@ router.patch('/:gameId/units/:unitId/standing-order', requireAuth, async (req, r
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// GET /api/map/:gameId/combat-log?turn=N
+// Players see their own game's combat log for any completed turn.
+// Defaults to the last completed turn.
+router.get('/:gameId/combat-log', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  if (!isGM) {
+    const { data: participant } = await adminDb
+      .from('game_participants').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).maybeSingle();
+    if (!participant) return res.status(403).json({ error: 'Not a participant in this game' });
+  }
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  const currentTurn = game?.current_turn ?? 1;
+  const turn = req.query.turn != null ? Number(req.query.turn) : currentTurn - 1;
+
+  if (turn < 0) return res.json({ turn: 0, current_turn: currentTurn, entries: [] });
+
+  const { data: entries, error } = await adminDb
+    .from('combat_log')
+    .select('id, turn, phase, hex_q, hex_r, log_type, faction_id, data, created_at')
+    .eq('game_id', gameId)
+    .eq('turn', turn)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ turn, current_turn: currentTurn, entries: entries ?? [] });
 });
 
 export default router;

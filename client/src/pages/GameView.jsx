@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +31,9 @@ export default function GameView() {
   const [turnReady, setTurnReady] = useState(false);
   const [turnMsg, setTurnMsg] = useState('');
   const [mapRefreshKey, setMapRefreshKey] = useState(0);
+  const [combatLog, setCombatLog] = useState(null);
+  const [logTurn, setLogTurn] = useState(null);
+  const [showLog, setShowLog] = useState(false);
 
   async function authHeaders() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -76,6 +79,19 @@ export default function GameView() {
 
     return () => supabase.removeChannel(channel);
   }, [gameId, profile]);
+
+  const loadCombatLog = useCallback(async (turn) => {
+    const headers = await authHeaders();
+    const url = turn != null
+      ? `${SERVER}/api/map/${gameId}/combat-log?turn=${turn}`
+      : `${SERVER}/api/map/${gameId}/combat-log`;
+    const r = await fetch(url, { headers });
+    if (r.ok) {
+      const d = await r.json();
+      setCombatLog(d);
+      setLogTurn(d.turn);
+    }
+  }, [gameId]);
 
   async function finishTurn() {
     const headers = await authHeaders();
@@ -175,6 +191,90 @@ export default function GameView() {
         faction={faction}
         refreshKey={mapRefreshKey}
       />
+
+      {/* Combat Log */}
+      <div style={{ marginTop: 16, background: '#111827', border: '1px solid #1e293b', borderRadius: 8, padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: showLog ? 12 : 0 }}>
+          <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600 }}>Combat Log</span>
+          <button
+            style={{ background: 'none', border: '1px solid #1e293b', color: '#64748b', padding: '2px 10px', borderRadius: 3, fontSize: 12, cursor: 'pointer', marginLeft: 'auto' }}
+            onClick={() => { setShowLog(v => !v); if (!showLog && !combatLog) loadCombatLog(null); }}
+          >
+            {showLog ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {showLog && (
+          <div>
+            {combatLog ? (
+              <>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ color: '#64748b', fontSize: 12 }}>Turn {combatLog.turn}</span>
+                  <button
+                    style={{ background: 'none', border: '1px solid #1e293b', color: '#94a3b8', padding: '1px 8px', borderRadius: 3, fontSize: 11, cursor: 'pointer' }}
+                    disabled={logTurn <= 0}
+                    onClick={() => logTurn > 0 && loadCombatLog(logTurn - 1)}
+                  >
+                    ← Earlier
+                  </button>
+                  <button
+                    style={{ background: 'none', border: '1px solid #1e293b', color: '#94a3b8', padding: '1px 8px', borderRadius: 3, fontSize: 11, cursor: 'pointer' }}
+                    disabled={logTurn >= (combatLog.current_turn - 1)}
+                    onClick={() => logTurn < (combatLog.current_turn - 1) && loadCombatLog(logTurn + 1)}
+                  >
+                    Later →
+                  </button>
+                </div>
+                {combatLog.entries.length === 0 && (
+                  <p style={{ color: '#475569', fontSize: 12 }}>No events recorded for this turn.</p>
+                )}
+                {combatLog.entries.map(e => (
+                  <PlayerLogEntry key={e.id} entry={e} />
+                ))}
+              </>
+            ) : (
+              <p style={{ color: '#475569', fontSize: 12 }}>Loading…</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const LOG_TYPE_COLOR = { combat: '#ef4444', bombardment: '#fb923c', retreat: '#60a5fa', naval_combat: '#38bdf8' };
+
+function PlayerLogEntry({ entry }) {
+  const [open, setOpen] = useState(false);
+  const d = entry.data ?? {};
+  const phase = entry.phase === 1 ? 'Air' : entry.phase === 2 ? 'Naval' : entry.phase === 3 ? 'Ground' : 'Phase 4';
+
+  function summary() {
+    if (d.event === 'retreat') return `Unit retreated to (${d.to_hex?.q},${d.to_hex?.r})`;
+    if (d.event === 'retreat_fire') return `Retreat fire: ${Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0)} casualties`;
+    if (d.event === 'pursuit_roll') return `Pursuit ${d.success ? 'succeeded' : 'failed'} (rolled ${d.roll}/${d.roll_target})`;
+    if (entry.log_type === 'bombardment') return `Bombardment: ${d.hits_vs_units ?? 0} unit hits, ${d.hits_vs_infra ?? 0} infra hits`;
+    const totalCas = Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0);
+    if (totalCas > 0) return `Combat at (${entry.hex_q},${entry.hex_r}): ${totalCas} total casualties`;
+    return `Event at (${entry.hex_q},${entry.hex_r})`;
+  }
+
+  const typeColor = LOG_TYPE_COLOR[entry.log_type] ?? '#64748b';
+
+  return (
+    <div style={{ marginBottom: 4, borderLeft: `2px solid ${typeColor}`, paddingLeft: 8 }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}
+      >
+        <span style={{ color: typeColor, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>{phase}</span>
+        <span style={{ color: '#cbd5e1', fontSize: 12 }}>{summary()}</span>
+        <span style={{ color: '#475569', fontSize: 11, marginLeft: 'auto' }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <pre style={{ color: '#64748b', fontSize: 10, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {JSON.stringify(d, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }

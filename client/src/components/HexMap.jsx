@@ -87,6 +87,10 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [movePath, setMovePath] = useState([]);
   const [selectedUnit, setSelectedUnit] = useState(null);
 
+  // Split-order state: when splitting, include split_quantity with the move order
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitQty, setSplitQty] = useState(1);
+
   // Bombard-order state
   const [bombardMode, setBombardMode] = useState(false);
   const [bombardTarget, setBombardTarget] = useState(null);
@@ -278,16 +282,32 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       body: JSON.stringify({
         unit_id: selectedUnit.id,
         path: movePath,
+        ...(splitMode && splitQty > 0 ? { split_quantity: splitQty } : {}),
         ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
       }),
     });
     setMoveMode(false);
     setMovePath([]);
+    setSplitMode(false);
+    setSplitQty(1);
     setCurrentOrders([]);
     setSelectedUnit(null);
     setSelected(null);
     load();
-  }, [selectedUnit, movePath, gameId, viewAsFactionId, load]);
+  }, [selectedUnit, movePath, splitMode, splitQty, gameId, viewAsFactionId, load]);
+
+  const enterSplitMode = useCallback(() => {
+    if (!selectedUnit || !selectedUnit.quantity || selectedUnit.quantity <= 1) return;
+    setSplitMode(true);
+    setSplitQty(1);
+  }, [selectedUnit]);
+
+  const cancelSplit = useCallback(() => {
+    setSplitMode(false);
+    setSplitQty(1);
+    setMoveMode(false);
+    setMovePath([]);
+  }, []);
 
   const enterBombardMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -855,6 +875,11 @@ function HexDetail({
               isContested={isContested}
               hasRepairFacility={hasRepairFacility}
               onSetPatrol={onSetPatrol}
+              splitMode={splitMode}
+              splitQty={splitQty}
+              onEnterSplitMode={enterSplitMode}
+              onCancelSplit={cancelSplit}
+              onSplitQtyChange={setSplitQty}
             />
           )}
 
@@ -1065,6 +1090,11 @@ function OrderPanel({
   isContested,
   hasRepairFacility = false,
   onSetPatrol,
+  splitMode = false,
+  splitQty = 1,
+  onEnterSplitMode,
+  onCancelSplit,
+  onSplitQtyChange,
 }) {
   const [pendingBuildType, setPendingBuildType] = useState('');
 
@@ -1086,7 +1116,7 @@ function OrderPanel({
     orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
   }
 
-  const inAnyMode = moveMode || bombardMode || buildMode || bridgeBuildMode;
+  const inAnyMode = moveMode || bombardMode || buildMode || bridgeBuildMode || splitMode;
 
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
@@ -1126,17 +1156,44 @@ function OrderPanel({
         </p>
       )}
 
+      {/* Split mode — choose how many units to split off, then enter move mode */}
+      {splitMode && !moveMode && (
+        <div>
+          <p style={{ color: '#fbbf24', fontSize: 11, marginBottom: 8 }}>
+            Split off units: enter count, then plot their move path.
+          </p>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ color: '#94a3b8', fontSize: 12 }}>Units to split:</span>
+            <input
+              type="number" min={1} max={unit.quantity - 1}
+              value={splitQty}
+              onChange={e => onSplitQtyChange(Math.min(Math.max(1, parseInt(e.target.value) || 1), unit.quantity - 1))}
+              style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 3, padding: '3px 6px', color: '#e2e8f0', fontSize: 12, width: 52 }}
+            />
+            <span style={{ color: '#64748b', fontSize: 11 }}>of {unit.quantity}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button style={{ ...BTN.base, ...BTN.move }} onClick={onEnterMoveMode} title="Plot the move path for the split-off group">
+              Move Split Group…
+            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelSplit}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Move mode */}
       {moveMode && (
         <div>
           <p style={{ color: '#fbbf24', fontSize: 11, marginBottom: 8 }}>
-            Click hexes to add waypoints — {movePath.length - 1} step{movePath.length !== 2 ? 's' : ''} plotted.
+            {splitMode
+              ? `Splitting ${splitQty} of ${unit.quantity} — click hexes to plot path.`
+              : `Click hexes to add waypoints — ${movePath.length - 1} step${movePath.length !== 2 ? 's' : ''} plotted.`}
           </p>
           <div style={{ display: 'flex', gap: 6 }}>
             <button style={{ ...BTN.base, ...BTN.confirm, opacity: hasPath ? 1 : 0.5 }} disabled={!hasPath} onClick={onConfirmMove}>
-              Confirm Move
+              {splitMode ? 'Confirm Split' : 'Confirm Move'}
             </button>
-            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelMove}>Cancel</button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={splitMode ? onCancelSplit : onCancelMove}>Cancel</button>
           </div>
         </div>
       )}
@@ -1235,6 +1292,15 @@ function OrderPanel({
               >
                 Move
               </button>
+              {!hasHp && unit.quantity > 1 && (
+                <button
+                  style={{ ...BTN.base, background: '#1e3a5f', color: '#93c5fd', border: '1px solid #1d4ed8' }}
+                  title={`Split: Detach some units from this stack and give them separate orders. Stack has ${unit.quantity} units.`}
+                  onClick={onEnterSplitMode}
+                >
+                  Split
+                </button>
+              )}
               <button
                 style={{ ...BTN.base, background: '#7c3aed', color: '#e2e8f0' }}
                 title="Fortify: Dig in for +1 defense. Bonus persists until you move. Cancelled if enemies enter before completion."
@@ -1327,8 +1393,8 @@ function OrderPanel({
   );
 }
 
-const BUILDING_TYPES = ['factory', 'airbase', 'harbor', 'airstrip', 'bridge', 'fortification'];
-const BUILDING_MAX_HP_CLIENT = { factory: 20, airbase: 10, harbor: 10, airstrip: 4, bridge: 4, fortification: 4 };
+const BUILDING_TYPES = ['factory', 'airbase', 'harbor', 'airstrip', 'bridge', 'fortification', 'control_point'];
+const BUILDING_MAX_HP_CLIENT = { factory: 20, airbase: 10, harbor: 10, airstrip: 4, bridge: 4, fortification: 4, control_point: 4 };
 
 function GMBuildingEditor({ hex, gameId, onRefresh }) {
   const [factions, setFactions] = useState([]);

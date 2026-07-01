@@ -12,6 +12,7 @@ import { runPhase4 } from './phase4.js';
 import { computeVisibility, markScouted } from './visibility.js';
 import { executePhase1 } from './airPhase.js';
 import { executePhase2 } from './navalPhase.js';
+import { captureObjectives } from './captureObjectives.js';
 
 export async function resolveTurn(db, gameId) {
   const { data: game } = await db.from('games').select('current_turn').eq('id', gameId).single();
@@ -39,6 +40,10 @@ export async function resolveTurn(db, gameId) {
 
   // Phase 3: Close combat — same-hex battles
   const combatResult = await executeGroundCombat(db, gameId, currentTurn);
+
+  // Phase 3: Auto-capture objective hexes (settlements, urban, buildings, resources)
+  // when exactly one faction's units occupy them post-combat.
+  const captureResult = await captureObjectives(db, gameId);
 
   // Phase 4 (repair/build orders must be read before we delete movement_orders)
   const phase4Result = await runPhase4(db, gameId, currentTurn);
@@ -85,11 +90,13 @@ export async function resolveTurn(db, gameId) {
       infra_damage: rangedResult.infraDamage,
       hexes_fought: combatResult.hexesFought,
       total_casualties: combatResult.totalCasualties,
+      captures: captureResult.captures?.length ?? 0,
       errors: [
         ...(retreatResult.errors ?? []),
         ...(moveResult.errors ?? []),
         ...(rangedResult.errors ?? []),
         ...(combatResult.errors ?? []),
+        ...(captureResult.errors ?? []),
       ],
     },
     phase4: phase4Result,
