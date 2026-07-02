@@ -156,6 +156,14 @@ export default function GMDashboard() {
     }
   }
 
+  async function deleteGame() {
+    if (!confirm(`Permanently delete "${game?.name}"? This cannot be undone — all hexes, units, orders, and fog-of-war data will be erased.`)) return;
+    const h = await headers();
+    const r = await fetch(`${SERVER}/api/gm/${gameId}`, { method: 'DELETE', headers: h });
+    if (r.ok) nav('/');
+    else { const d = await r.json(); setMsg(d.error ?? 'Delete failed.'); }
+  }
+
   async function toggleAutoResolve(val) {
     setAutoResolve(val);
     const h = await headers();
@@ -223,6 +231,12 @@ export default function GMDashboard() {
           <input type="checkbox" checked={autoResolve} onChange={e => toggleAutoResolve(e.target.checked)} />
           Auto-resolve when all ready
         </label>
+        <button
+          onClick={deleteGame}
+          style={{ marginLeft: 'auto', background: 'none', border: '1px solid #7f1d1d', color: '#f87171', borderRadius: 4, padding: '5px 14px', cursor: 'pointer', fontSize: 13 }}
+        >
+          Delete Game
+        </button>
       </div>
 
       {/* Win condition banner */}

@@ -288,4 +288,14 @@ router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
   res.json({ loaded: mapHexes.length });
 });
 
+// DELETE /api/gm/:gameId — permanently delete a game and all related data
+// All child tables (hexes, factions, units, orders, fog, buildings, etc.)
+// cascade-delete via FK constraints when the games row is removed.
+router.delete('/:gameId', requireGM, async (req, res) => {
+  const { gameId } = req.params;
+  const { error } = await adminDb.from('games').delete().eq('id', gameId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
 export default router;
