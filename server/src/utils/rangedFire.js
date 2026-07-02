@@ -25,6 +25,7 @@
 // =============================================================
 
 import { defenseBonus, distributeDice } from './combat.js';
+import { fetchAll } from '../db.js';
 import { handleBridgeCollapse } from './bridgeCollapse.js';
 
 // ---------------------------------------------------------------------------
@@ -90,21 +91,18 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   // -------------------------------------------------------------------------
   // 1. Load all units for the game, joined with unit_type_config stats.
   // -------------------------------------------------------------------------
-  const { data: allUnits, error: unitsError } = await db
-    .from('units')
-    .select(
-      'id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level'
-    )
-    .eq('game_id', gameId)
-    .limit(10000);
-
-  if (unitsError) {
+  let allUnits;
+  try {
+    allUnits = await fetchAll(() => db.from('units')
+      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
+      .eq('game_id', gameId));
+  } catch (e) {
     return {
       bombardTargets: [],
       rangedEngagements: [],
       totalCasualties: 0,
       infraDamage: [],
-      errors: [`Failed to load units: ${unitsError.message}`],
+      errors: [`Failed to load units: ${e.message}`],
     };
   }
 
@@ -190,24 +188,23 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   // -------------------------------------------------------------------------
   // 4. Load hex data (vegetation, fortification context).
   // -------------------------------------------------------------------------
-  const { data: hexRows, error: hexError } = await db
-    .from('hexes')
-    .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation')
-    .eq('game_id', gameId)
-    .limit(10000);
-
-  if (hexError) {
+  let hexRows;
+  try {
+    hexRows = await fetchAll(() => db.from('hexes')
+      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation')
+      .eq('game_id', gameId));
+  } catch (e) {
     return {
       bombardTargets: [],
       rangedEngagements: [],
       totalCasualties: 0,
       infraDamage: [],
-      errors: [`Failed to load hexes: ${hexError.message}`],
+      errors: [`Failed to load hexes: ${e.message}`],
     };
   }
 
   const hexDataByKey = new Map();
-  for (const h of hexRows ?? []) {
+  for (const h of hexRows) {
     hexDataByKey.set(`${h.hex_q},${h.hex_r}`, h);
   }
 

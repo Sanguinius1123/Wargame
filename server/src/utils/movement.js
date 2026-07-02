@@ -17,6 +17,7 @@
 // =============================================================
 
 import { isAdjacent, hexDist, hexesInRange } from './hexGeometry.js';
+import { fetchAll } from '../db.js';
 
 // ---------------------------------------------------------------------------
 // Dice helpers (kept inline — movement.js is self-contained).
@@ -521,32 +522,31 @@ export async function executeGroundMoves(db, gameId, turn) {
   //    We join terrain_type_config inline. The hexes table stores terrain
   //    as a name string that references terrain_type_config.name.
   // ------------------------------------------------------------------
-  const { data: hexRows, error: hexError } = await db
-    .from('hexes')
-    .select(`
-      hex_q,
-      hex_r,
-      terrain,
-      has_road,
-      has_heavy_vegetation,
-      terrain_type_config!inner (
-        name,
-        foot_cost,
-        mech_cost,
-        foot_road_cost,
-        mech_road_cost
-      )
-    `)
-    .eq('game_id', gameId)
-    .limit(10000);
-
-  if (hexError) {
-    return { moved: 0, skipped: 0, errors: [`Failed to load hexes: ${hexError.message}`], movedUnitIds: new Set() };
+  let hexRows;
+  try {
+    hexRows = await fetchAll(() => db.from('hexes')
+      .select(`
+        hex_q,
+        hex_r,
+        terrain,
+        has_road,
+        has_heavy_vegetation,
+        terrain_type_config!inner (
+          name,
+          foot_cost,
+          mech_cost,
+          foot_road_cost,
+          mech_road_cost
+        )
+      `)
+      .eq('game_id', gameId));
+  } catch (e) {
+    return { moved: 0, skipped: 0, errors: [`Failed to load hexes: ${e.message}`], movedUnitIds: new Set() };
   }
 
   // Build lookup map.
   const hexesByKey = new Map();
-  for (const hex of hexRows ?? []) {
+  for (const hex of hexRows) {
     hexesByKey.set(`${hex.hex_q},${hex.hex_r}`, hex);
   }
 

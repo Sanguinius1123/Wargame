@@ -29,6 +29,8 @@
 //   with to_hit IS NULL found alone in a hex with enemies is deleted.
 // =============================================================
 
+import { fetchAll } from '../db.js';
+
 // ---------------------------------------------------------------------------
 // roll2d6 — Roll two six-sided dice and return the sum (2–12).
 // ---------------------------------------------------------------------------
@@ -274,17 +276,16 @@ export async function executeGroundCombat(db, gameId, turn) {
   // -----------------------------------------------------------------------
   // 1. Load all units for the game.
   // -----------------------------------------------------------------------
-  const { data: allUnits, error: unitsError } = await db
-    .from('units')
-    .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
-    .eq('game_id', gameId)
-    .limit(10000);
-
-  if (unitsError) {
+  let allUnits;
+  try {
+    allUnits = await fetchAll(() => db.from('units')
+      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
+      .eq('game_id', gameId));
+  } catch (e) {
     return {
       hexesFought: 0,
       totalCasualties: 0,
-      errors: [`Failed to load units: ${unitsError.message}`],
+      errors: [`Failed to load units: ${e.message}`],
     };
   }
 
@@ -346,25 +347,15 @@ export async function executeGroundCombat(db, gameId, turn) {
   // -----------------------------------------------------------------------
   // 4. Load hex data for vegetation info; load fortification buildings.
   // -----------------------------------------------------------------------
-  const [{ data: hexRows, error: hexError }, { data: fortBuildingRows }] = await Promise.all([
-    db.from('hexes')
+  const [hexRows, fortBuildingRows] = await Promise.all([
+    fetchAll(() => db.from('hexes')
       .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
-      .eq('game_id', gameId)
-      .limit(10000),
-    db.from('buildings')
+      .eq('game_id', gameId)),
+    fetchAll(() => db.from('buildings')
       .select('hex_q, hex_r, type, current_hp, owner_faction_id')
       .eq('game_id', gameId)
-      .limit(10000)
-      .eq('type', 'fortification'),
+      .eq('type', 'fortification')),
   ]);
-
-  if (hexError) {
-    return {
-      hexesFought: 0,
-      totalCasualties: 0,
-      errors: [`Failed to load hexes: ${hexError.message}`],
-    };
-  }
 
   const hexDataByKey = new Map();
   for (const h of hexRows ?? []) {

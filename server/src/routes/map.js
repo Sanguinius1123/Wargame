@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { adminDb } from '../db.js';
+import { adminDb, fetchAll } from '../db.js';
 import { requireAuth, requireGM } from '../middleware/auth.js';
 import { computeVisibility, markScouted } from '../utils/visibility.js';
 
@@ -11,23 +11,29 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   const { gameId } = req.params;
   const isGM = req.user.global_role === 'gm';
 
-  // Load all hexes (GM queries bypass RLS via adminDb)
-  const { data: hexes, error } = await adminDb
-    .from('hexes')
-    .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, settlement_name, has_road, has_bridge, has_canal, has_railroad')
-    .eq('game_id', gameId)
-    .limit(10000);
-  if (error) return res.status(500).json({ error: error.message });
-
-  // Load all units grouped by hex
-  const { data: units } = await adminDb
-    .from('units')
-    .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, bombard_to_hit, bombard_range)')
-    .eq('game_id', gameId)
-    .limit(10000);
+  // Load all hexes and units — paginated to bypass server max_rows=1000 cap
+  let hexes, units, buildings, resourceTiles;
+  try {
+    [hexes, units, buildings, resourceTiles] = await Promise.all([
+      fetchAll(() => adminDb.from('hexes')
+        .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, settlement_name, has_road, has_bridge, has_canal, has_railroad')
+        .eq('game_id', gameId)),
+      fetchAll(() => adminDb.from('units')
+        .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, bombard_to_hit, bombard_range)')
+        .eq('game_id', gameId)),
+      fetchAll(() => adminDb.from('buildings')
+        .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
+        .eq('game_id', gameId)),
+      fetchAll(() => adminDb.from('resource_tiles')
+        .select('id, hex_q, hex_r, tile_type, owner_faction_id')
+        .eq('game_id', gameId)),
+    ]);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 
   const unitsByHex = {};
-  for (const u of units ?? []) {
+  for (const u of units) {
     const k = `${u.hex_q},${u.hex_r}`;
     if (!unitsByHex[k]) unitsByHex[k] = [];
     unitsByHex[k].push({
@@ -46,29 +52,15 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     });
   }
 
-  // Load all buildings grouped by hex
-  const { data: buildings } = await adminDb
-    .from('buildings')
-    .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
-    .eq('game_id', gameId)
-    .limit(10000);
-
   const buildingsByHex = {};
-  for (const b of buildings ?? []) {
+  for (const b of buildings) {
     const k = `${b.hex_q},${b.hex_r}`;
     if (!buildingsByHex[k]) buildingsByHex[k] = [];
     buildingsByHex[k].push({ id: b.id, type: b.type, current_hp: b.current_hp, max_hp: b.max_hp, owner_faction_id: b.owner_faction_id });
   }
 
-  // Load resource tiles
-  const { data: resourceTiles } = await adminDb
-    .from('resource_tiles')
-    .select('id, hex_q, hex_r, tile_type, owner_faction_id')
-    .eq('game_id', gameId)
-    .limit(10000);
-
   const resourceTileByHex = {};
-  for (const rt of resourceTiles ?? []) {
+  for (const rt of resourceTiles) {
     resourceTileByHex[`${rt.hex_q},${rt.hex_r}`] = { id: rt.id, tile_type: rt.tile_type, owner_faction_id: rt.owner_faction_id };
   }
 

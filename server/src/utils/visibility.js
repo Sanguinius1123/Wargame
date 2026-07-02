@@ -3,25 +3,26 @@
 // "visible" = currently in LOS. "scouted" = ever seen (from DB), excluding currently visible.
 
 import { hexesInRange, offsetToAxial, axialToOffset, cubeRound } from './hexGeometry.js';
+import { fetchAll } from '../db.js';
 
 function key(q, r) { return `${q},${r}`; }
 
 export async function computeVisibility(db, factionId, gameId) {
-  const [unitsRes, terrainRes, scoutedRes] = await Promise.all([
-    db.from('units')
+  const [unitRows, terrainRows, scoutedRows] = await Promise.all([
+    fetchAll(() => db.from('units')
       .select('hex_q, hex_r, unit_type_config(los)')
       .eq('game_id', gameId)
-      .eq('faction_id', factionId)
-      .limit(10000),
-    db.from('hexes')
+      .eq('faction_id', factionId)),
+    fetchAll(() => db.from('hexes')
       .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(blocks_los)')
-      .eq('game_id', gameId)
-      .limit(10000),
-    db.from('scouted_hexes')
+      .eq('game_id', gameId)),
+    fetchAll(() => db.from('scouted_hexes')
       .select('hex_q, hex_r')
-      .eq('faction_id', factionId)
-      .limit(10000),
+      .eq('faction_id', factionId)),
   ]);
+  const unitsRes = { data: unitRows };
+  const terrainRes = { data: terrainRows };
+  const scoutedRes = { data: scoutedRows };
 
   // Mountains block LOS; vegetation blocks LOS into-but-not-through (handled by isBlocked)
   const blockingSet = new Set(
