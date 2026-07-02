@@ -277,7 +277,8 @@ export async function executeGroundCombat(db, gameId, turn) {
   const { data: allUnits, error: unitsError } = await db
     .from('units')
     .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   if (unitsError) {
     return {
@@ -348,10 +349,12 @@ export async function executeGroundCombat(db, gameId, turn) {
   const [{ data: hexRows, error: hexError }, { data: fortBuildingRows }] = await Promise.all([
     db.from('hexes')
       .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
-      .eq('game_id', gameId),
+      .eq('game_id', gameId)
+      .limit(10000),
     db.from('buildings')
       .select('hex_q, hex_r, type, current_hp, owner_faction_id')
       .eq('game_id', gameId)
+      .limit(10000)
       .eq('type', 'fortification'),
   ]);
 

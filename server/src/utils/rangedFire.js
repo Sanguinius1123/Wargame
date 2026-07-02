@@ -95,7 +95,8 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     .select(
       'id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level'
     )
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   if (unitsError) {
     return {
@@ -192,7 +193,8 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   const { data: hexRows, error: hexError } = await db
     .from('hexes')
     .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   if (hexError) {
     return {

@@ -537,7 +537,8 @@ export async function executeGroundMoves(db, gameId, turn) {
         mech_road_cost
       )
     `)
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   if (hexError) {
     return { moved: 0, skipped: 0, errors: [`Failed to load hexes: ${hexError.message}`], movedUnitIds: new Set() };

@@ -238,7 +238,8 @@ router.post('/:gameId/save-as-map', requireGM, async (req, res) => {
   const { data: hexes, error: hexErr } = await adminDb
     .from('hexes')
     .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
   if (hexErr) return res.status(500).json({ error: hexErr.message });
   if (!hexes?.length) return res.status(400).json({ error: 'Game has no hexes to save' });
 
@@ -268,7 +269,8 @@ router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
   const { data: mapHexes, error: mapErr } = await adminDb
     .from('map_hexes')
     .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
-    .eq('map_id', mapId);
+    .eq('map_id', mapId)
+    .limit(10000);
   if (mapErr) return res.status(500).json({ error: mapErr.message });
   if (!mapHexes?.length) return res.status(404).json({ error: 'Map not found or empty' });
 

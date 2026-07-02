@@ -15,14 +15,16 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   const { data: hexes, error } = await adminDb
     .from('hexes')
     .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_urban, urban_hp, has_settlement, settlement_name, has_road, has_bridge, has_canal, has_railroad')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
   if (error) return res.status(500).json({ error: error.message });
 
   // Load all units grouped by hex
   const { data: units } = await adminDb
     .from('units')
     .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, bombard_to_hit, bombard_range)')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   const unitsByHex = {};
   for (const u of units ?? []) {
@@ -48,7 +50,8 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   const { data: buildings } = await adminDb
     .from('buildings')
     .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   const buildingsByHex = {};
   for (const b of buildings ?? []) {
@@ -61,7 +64,8 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   const { data: resourceTiles } = await adminDb
     .from('resource_tiles')
     .select('id, hex_q, hex_r, tile_type, owner_faction_id')
-    .eq('game_id', gameId);
+    .eq('game_id', gameId)
+    .limit(10000);
 
   const resourceTileByHex = {};
   for (const rt of resourceTiles ?? []) {

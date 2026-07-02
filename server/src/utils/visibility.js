@@ -11,13 +11,16 @@ export async function computeVisibility(db, factionId, gameId) {
     db.from('units')
       .select('hex_q, hex_r, unit_type_config(los)')
       .eq('game_id', gameId)
-      .eq('faction_id', factionId),
+      .eq('faction_id', factionId)
+      .limit(10000),
     db.from('hexes')
       .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(blocks_los)')
-      .eq('game_id', gameId),
+      .eq('game_id', gameId)
+      .limit(10000),
     db.from('scouted_hexes')
       .select('hex_q, hex_r')
-      .eq('faction_id', factionId),
+      .eq('faction_id', factionId)
+      .limit(10000),
   ]);
 
   // Mountains block LOS; vegetation blocks LOS into-but-not-through (handled by isBlocked)
