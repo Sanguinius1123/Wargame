@@ -577,7 +577,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
       {/* Map */}
-      <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 600, position: 'relative' }}>
+      <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 180px)', minHeight: 500, position: 'relative' }}>
         {loading
           ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
           : <HexGrid
