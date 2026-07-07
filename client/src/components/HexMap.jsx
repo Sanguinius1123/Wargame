@@ -771,16 +771,13 @@ function HexDetail({
       {vis === 'visible' && (
         <>
           {/* Hex attributes */}
-          {(hex.has_settlement || hex.has_urban || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.has_road || hex.has_canal || hex.resource_tile) && (
+          {(hex.has_settlement || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.resource_tile) && (
             <div style={{ marginBottom: 10 }}>
               <p style={STAT_LABEL}>Attributes</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {hex.has_settlement && <Tag label="Settlement" color="#fbbf24" />}
-                {hex.has_urban && <Tag label={`Urban HP ${hex.urban_hp ?? 4}/4`} color="#a78bfa" />}
+                {hex.has_settlement && <Tag label={`Settlement (pop ${hex.settlement_size ?? 0})`} color="#fbbf24" />}
                 {hex.has_heavy_vegetation && <Tag label="Dense Forest" color="#22c55e" />}
                 {hex.has_light_vegetation && !hex.has_heavy_vegetation && <Tag label="Light Forest" color="#86efac" />}
-                {hex.has_road && <Tag label="Road" color="#94a3b8" />}
-                {hex.has_canal && <Tag label="Canal" color="#38bdf8" />}
                 {hex.resource_tile && <Tag label={`Resource (${hex.resource_tile.tile_type})`} color="#f59e0b" />}
               </div>
             </div>
@@ -959,12 +956,9 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
   const [form, setForm] = useState({
     terrain:              hex.terrain ?? 'plains',
     has_settlement:       hex.has_settlement ?? false,
-    has_urban:            hex.has_urban ?? false,
-    urban_hp:             hex.urban_hp ?? 4,
+    settlement_size:      hex.settlement_size ?? 0,
     has_light_vegetation: hex.has_light_vegetation ?? false,
     has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
-    has_road:             hex.has_road ?? false,
-    has_canal:            hex.has_canal ?? false,
     has_railroad:         hex.has_railroad ?? false,
   });
   const [saving, setSaving] = useState(false);
@@ -975,12 +969,9 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
     setForm({
       terrain:              hex.terrain ?? 'plains',
       has_settlement:       hex.has_settlement ?? false,
-      has_urban:            hex.has_urban ?? false,
-      urban_hp:             hex.urban_hp ?? 4,
+      settlement_size:      hex.settlement_size ?? 0,
       has_light_vegetation: hex.has_light_vegetation ?? false,
       has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
-      has_road:             hex.has_road ?? false,
-      has_canal:            hex.has_canal ?? false,
       has_railroad:         hex.has_railroad ?? false,
     });
     setMsg('');
@@ -1018,11 +1009,8 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
 
       {[
         ['has_settlement',       'Settlement'],
-        ['has_urban',            'Urban tile'],
         ['has_light_vegetation', 'Light vegetation'],
         ['has_heavy_vegetation', 'Heavy vegetation'],
-        ['has_road',             'Road'],
-        ['has_canal',            'Canal'],
         ['has_railroad',         'Railroad'],
       ].map(([key, label]) => (
         <div key={key} style={rowStyle}>
@@ -1031,10 +1019,10 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
         </div>
       ))}
 
-      {form.has_urban && (
+      {form.has_settlement && (
         <div style={{ marginBottom: 8 }}>
-          <div style={lbl}>Urban HP (0–4)</div>
-          <input type="number" min={0} max={4} style={iStyle} value={form.urban_hp} onChange={inp('urban_hp')} />
+          <div style={lbl}>Settlement Size (manpower yield)</div>
+          <input type="number" min={0} style={iStyle} value={form.settlement_size} onChange={inp('settlement_size')} />
         </div>
       )}
 
@@ -1053,8 +1041,6 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
 const BUILD_STRUCTURES = [
   { value: 'fortification', label: 'Fortification (+1 def, 4 HP)' },
   { value: 'airstrip',      label: 'Airstrip (4 HP)' },
-  { value: 'road',          label: 'Road segment' },
-  { value: 'canal',         label: 'Canal (10 manpower)' },
 ];
 
 function OrderPanel({

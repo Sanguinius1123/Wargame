@@ -238,7 +238,7 @@ router.post('/:gameId/save-as-map', requireGM, async (req, res) => {
   let hexes;
   try {
     hexes = await fetchAll(() => adminDb.from('hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
       .eq('game_id', gameId));
   } catch (e) { return res.status(500).json({ error: e.message }); }
   if (!hexes.length) return res.status(400).json({ error: 'Game has no hexes to save' });
@@ -269,7 +269,7 @@ router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
   let mapHexes;
   try {
     mapHexes = await fetchAll(() => adminDb.from('map_hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
       .eq('map_id', mapId));
   } catch (e) { return res.status(500).json({ error: e.message }); }
   if (!mapHexes.length) return res.status(404).json({ error: 'Map not found or empty' });
@@ -284,7 +284,7 @@ router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
 
   const { error: insertErr } = await adminDb
     .from('hexes')
-    .insert(mapHexes.map(h => ({ game_id: gameId, ...h, urban_hp: 4 })));
+    .insert(mapHexes.map(h => ({ game_id: gameId, ...h })));
   if (insertErr) return res.status(500).json({ error: insertErr.message });
 
   res.json({ loaded: mapHexes.length });

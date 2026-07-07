@@ -1,75 +1,66 @@
-// Compute which hexes a faction can currently see based on unit LOS ranges.
+// Compute which hexes a faction can currently see.
+//
+// Visibility rules (strategic scale):
+//   - Every unit sees its own hex + all 6 adjacent hexes (distance ≤ 1).
+//   - Naval units (tags includes 'naval') see water hexes at distance ≤ 2.
+//   - Shoreline units (on a non-water hex adjacent to at least one water hex)
+//     also see water hexes at distance ≤ 2.
+//
 // Returns { visible: Set<"q,r">, scouted: Set<"q,r"> }
-// "visible" = currently in LOS. "scouted" = ever seen (from DB), excluding currently visible.
 
-import { hexesInRange, offsetToAxial, axialToOffset, cubeRound } from './hexGeometry.js';
+import { hexesInRange, offsetNeighbors } from './hexGeometry.js';
 import { fetchAll } from '../db.js';
 
 function key(q, r) { return `${q},${r}`; }
 
 export async function computeVisibility(db, factionId, gameId) {
-  const [unitRows, terrainRows, scoutedRows] = await Promise.all([
+  const [unitRows, hexRows, scoutedRows] = await Promise.all([
     fetchAll(() => db.from('units')
-      .select('hex_q, hex_r, unit_type_config(los)')
+      .select('hex_q, hex_r, unit_type_config(tags)')
       .eq('game_id', gameId)
       .eq('faction_id', factionId)),
     fetchAll(() => db.from('hexes')
-      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(blocks_los)')
+      .select('hex_q, hex_r, terrain')
       .eq('game_id', gameId)),
     fetchAll(() => db.from('scouted_hexes')
       .select('hex_q, hex_r')
       .eq('faction_id', factionId)),
   ]);
-  const unitsRes = { data: unitRows };
-  const terrainRes = { data: terrainRows };
-  const scoutedRes = { data: scoutedRows };
 
-  // Mountains block LOS; vegetation blocks LOS into-but-not-through (handled by isBlocked)
-  const blockingSet = new Set(
-    (terrainRes.data ?? [])
-      .filter(h => h.terrain_type_config?.blocks_los || h.has_light_vegetation || h.has_heavy_vegetation)
-      .map(h => key(h.hex_q, h.hex_r))
-  );
+  const hexTerrain = new Map();
+  for (const h of hexRows) hexTerrain.set(key(h.hex_q, h.hex_r), h.terrain);
 
   const visible = new Set();
 
-  for (const unit of unitsRes.data ?? []) {
-    const range = unit.unit_type_config?.los ?? 2;
-    const candidates = hexesInRange(unit.hex_q, unit.hex_r, range);
-    for (const k of candidates) {
-      if (!isBlocked(unit.hex_q, unit.hex_r, k, blockingSet)) {
-        visible.add(k);
+  for (const unit of unitRows) {
+    const q = unit.hex_q;
+    const r = unit.hex_r;
+    const tags = unit.unit_type_config?.tags ?? [];
+    const isNaval = tags.includes('naval');
+    const ownTerrain = hexTerrain.get(key(q, r));
+
+    // All units: own hex + all adjacent hexes.
+    for (const k of hexesInRange(q, r, 1)) visible.add(k);
+
+    // Extended water vision: naval units always; land units on shoreline.
+    const isShoreline = !isNaval
+      && ownTerrain !== 'water'
+      && offsetNeighbors(q, r).some(nb => hexTerrain.get(key(nb.q, nb.r)) === 'water');
+
+    if (isNaval || isShoreline) {
+      for (const k of hexesInRange(q, r, 2)) {
+        if (hexTerrain.get(k) === 'water') visible.add(k);
       }
     }
   }
 
   const scouted = new Set(
-    (scoutedRes.data ?? [])
+    scoutedRows
       .map(h => key(h.hex_q, h.hex_r))
       .filter(k => !visible.has(k))
   );
 
   return { visible, scouted };
-}
-
-// LOS check: interpolate in axial space so intermediate hexes map correctly
-// to offset coords (offset interpolation produces wrong intermediate hexes).
-function isBlocked(fromQ, fromR, toKey, blockingSet) {
-  const [toQ, toR] = toKey.split(',').map(Number);
-  if (fromQ === toQ && fromR === toR) return false;
-
-  const fa = offsetToAxial(fromQ, fromR);
-  const ta = offsetToAxial(toQ, toR);
-  const dq = ta.q - fa.q, dr = ta.r - fa.r;
-  const steps = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
-
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const { q: iq, r: ir } = cubeRound(fa.q + dq * t, fa.r + dr * t);
-    const { q: oq, r: or_ } = axialToOffset(iq, ir);
-    if (blockingSet.has(key(oq, or_))) return true;
-  }
-  return false;
 }
 
 export async function markScouted(db, factionId, gameId, visibleKeys, currentTurn) {

@@ -148,144 +148,26 @@ export async function advanceProduction(db, gameId, currentTurn) {
 
 // ---------------------------------------------------------------------------
 // 3. calculateManpower
-// Settlement control: faction owns ≥ 3/4 of urban tiles assigned to it.
-// Urban tile assignment: nearest settlement by hex distance.
-// Manpower = count of urban tiles reachable (BFS) from controlled settlement.
+// Manpower = sum of settlement_size for each settlement hex owned by the faction.
+// Ownership: the faction whose unit occupies the hex uncontested (set in captureObjectives).
 // Manpower is NOT saved across turns (reset each Phase 4 before re-calculating).
 // ---------------------------------------------------------------------------
 export async function calculateManpower(db, gameId) {
-  // Load all settlement hexes
   const { data: settlements } = await db
     .from('hexes')
-    .select('hex_q, hex_r, owner_faction_id')
+    .select('hex_q, hex_r, owner_faction_id, settlement_size')
     .eq('game_id', gameId)
     .eq('has_settlement', true);
 
   if (!settlements?.length) return { assigned: {} };
 
-  // Load all urban hexes
-  const { data: urbanHexes } = await db
-    .from('hexes')
-    .select('hex_q, hex_r, owner_faction_id, urban_hp')
-    .eq('game_id', gameId)
-    .eq('has_urban', true);
-
-  if (!urbanHexes?.length) return { assigned: {} };
-
-  // Assign each urban tile to nearest settlement.
-  // Tie-break: prefer settlement owned by same faction as the urban tile.
-  const urbanAssignment = new Map(); // "q,r" → settlement {hex_q, hex_r, owner_faction_id}
-
-  for (const urban of urbanHexes) {
-    let bestDist = Infinity;
-    let bestSett = null;
-
-    for (const sett of settlements) {
-      const d = hexDist(urban.hex_q, urban.hex_r, sett.hex_q, sett.hex_r);
-      if (d < bestDist) {
-        bestDist = d; bestSett = sett;
-      } else if (d === bestDist) {
-        // Tie-break: same faction as the urban tile wins.
-        // Only replace if the candidate matches and the current winner doesn't.
-        const candidateMatch = sett.owner_faction_id === urban.owner_faction_id;
-        const prevMatch = bestSett?.owner_faction_id === urban.owner_faction_id;
-        if (candidateMatch && !prevMatch) bestSett = sett;
-      }
-    }
-
-    if (bestSett) urbanAssignment.set(`${urban.hex_q},${urban.hex_r}`, bestSett);
-  }
-
-  // For each settlement: count total assigned tiles and faction-owned tiles.
-  const settKey = (s) => `${s.hex_q},${s.hex_r}`;
-  const settTotals = new Map();   // settKey → { total, byFaction: Map<faction_id, count> }
-  const settObj    = new Map();   // settKey → settlement
-
-  for (const sett of settlements) {
-    settTotals.set(settKey(sett), { total: 0, byFaction: new Map() });
-    settObj.set(settKey(sett), sett);
-  }
-
-  for (const [, sett] of urbanAssignment) {
-    const k = settKey(sett);
-    const entry = settTotals.get(k);
-    if (!entry) continue;
-    entry.total++;
-  }
-
-  // Now count owned tiles per faction per settlement
-  const urbanByKey = new Map(urbanHexes.map(u => [`${u.hex_q},${u.hex_r}`, u]));
-
-  for (const [urbanKey, sett] of urbanAssignment) {
-    const urban = urbanByKey.get(urbanKey);
-    if (!urban?.owner_faction_id) continue;
-    const k = settKey(sett);
-    const entry = settTotals.get(k);
-    if (!entry) continue;
-    const prev = entry.byFaction.get(urban.owner_faction_id) ?? 0;
-    entry.byFaction.set(urban.owner_faction_id, prev + 1);
-  }
-
-  // Determine which factions control each settlement (≥ 3/4 of assigned tiles).
-  const controlledBy = new Map(); // settKey → faction_id or null
-
-  for (const [k, entry] of settTotals) {
-    let controller = null;
-    for (const [fid, owned] of entry.byFaction) {
-      if (entry.total > 0 && owned / entry.total >= 0.75) {
-        controller = fid;
-        break;
-      }
-    }
-    controlledBy.set(k, controller);
-
-    // Update settlement hex owner to match controller
-    const sett = settObj.get(k);
-    await db.from('hexes')
-      .update({ owner_faction_id: controller })
-      .eq('game_id', gameId).eq('hex_q', sett.hex_q).eq('hex_r', sett.hex_r);
-  }
-
-  // BFS from each controlled settlement through contiguous urban tiles to count manpower.
-  // Only urban tiles that produce (urban_hp >= 3, i.e. not heavily damaged) count.
-  const hexIndex = new Map(urbanHexes.map(u => [`${u.hex_q},${u.hex_r}`, u]));
-
   const factionManpower = new Map();
-
-  for (const [k, factionId] of controlledBy) {
-    if (!factionId) continue;
-    const sett = settObj.get(k);
-
-    let count = 0;
-    const visited = new Set([`${sett.hex_q},${sett.hex_r}`]);
-    const queue = [{ q: sett.hex_q, r: sett.hex_r }];
-
-    // Count the settlement hex itself if it is urban, owned, and producing.
-    const settUrban = hexIndex.get(`${sett.hex_q},${sett.hex_r}`);
-    if (settUrban && settUrban.owner_faction_id === factionId && settUrban.urban_hp >= 3) {
-      count++;
-    }
-
-    while (queue.length) {
-      const { q, r } = queue.shift();
-      for (const { q: nq, r: nr } of offsetNeighbors(q, r)) {
-        const nk = `${nq},${nr}`;
-        if (visited.has(nk)) continue;
-        visited.add(nk);
-        const urban = hexIndex.get(nk);
-        // Must be urban, owned by this faction, and producing (hp ≥ 3)
-        if (urban && urban.owner_faction_id === factionId && urban.urban_hp >= 3) {
-          count++;
-          queue.push({ q: nq, r: nr });
-        }
-      }
-    }
-
-    const prev = factionManpower.get(factionId) ?? 0;
-    factionManpower.set(factionId, prev + count);
+  for (const s of settlements) {
+    if (!s.owner_faction_id) continue;
+    const prev = factionManpower.get(s.owner_faction_id) ?? 0;
+    factionManpower.set(s.owner_faction_id, prev + (s.settlement_size ?? 0));
   }
 
-  // Reset all factions' manpower then assign
   const { data: allFactions } = await db
     .from('factions').select('id').eq('game_id', gameId);
 
@@ -499,25 +381,6 @@ export async function processBuildOrders(db, gameId, currentTurn) {
 
     const tq = target_hex_q ?? unit.hex_q;
     const tr = target_hex_r ?? unit.hex_r;
-
-    if (structure_type === 'road') {
-      await db.from('hexes').update({ has_road: true })
-        .eq('game_id', gameId).eq('hex_q', tq).eq('hex_r', tr);
-      built++;
-      continue;
-    }
-
-    if (structure_type === 'canal') {
-      // Canal: deduct 10 manpower, set has_canal, truck NOT consumed
-      const { data: faction } = await db
-        .from('factions').select('id, manpower').eq('id', unit.faction_id).single();
-      if (!faction || faction.manpower < 10) continue;
-      await db.from('factions').update({ manpower: faction.manpower - 10 }).eq('id', faction.id);
-      await db.from('hexes').update({ has_canal: true })
-        .eq('game_id', gameId).eq('hex_q', tq).eq('hex_r', tr);
-      built++;
-      continue;
-    }
 
     const maxHp = STRUCTURE_MAX_HP[structure_type];
     if (!maxHp) continue;

@@ -33,12 +33,12 @@ export async function captureObjectives(db, gameId) {
     unitsByHex.get(k).add(u.faction_id);
   }
 
-  // Load all objective hexes: has_settlement, has_urban, or has any building/resource
+  // Load all objective hexes: has_settlement, or has any building/resource tile
   const { data: objectiveHexes, error: hexErr } = await db
     .from('hexes')
-    .select('hex_q, hex_r, owner_faction_id, has_settlement, has_urban')
+    .select('hex_q, hex_r, owner_faction_id, has_settlement')
     .eq('game_id', gameId)
-    .or('has_settlement.eq.true,has_urban.eq.true,owner_faction_id.not.is.null');
+    .or('has_settlement.eq.true,owner_faction_id.not.is.null');
   if (hexErr) return { captures, errors: [hexErr.message] };
 
   // Also load buildings and resource tiles to get ALL objective hexes even if

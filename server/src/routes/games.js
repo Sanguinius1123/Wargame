@@ -35,10 +35,10 @@ router.post('/', requireGM, async (req, res) => {
   if (map_id) {
     const { data: mapHexes } = await adminDb
       .from('map_hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, has_light_vegetation, has_heavy_vegetation, has_urban, has_road, has_railroad, has_canal, has_bridge')
+      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
       .eq('map_id', map_id);
     if (mapHexes?.length) {
-      await adminDb.from('hexes').insert(mapHexes.map(h => ({ game_id: game.id, ...h, urban_hp: 4 })));
+      await adminDb.from('hexes').insert(mapHexes.map(h => ({ game_id: game.id, ...h })));
     }
   }
 

@@ -101,6 +101,9 @@ export function defenseBonus(unit, hex, hasFortificationBuilding = false) {
   if (unit.fortification_level === 1) bonus += 1;
   if (hasFortificationBuilding) bonus += 1;
 
+  // Terrain defense bonus (hills +1, mountains +2, wetlands +1, etc.)
+  bonus += hex.terrain_type_config?.defense_bonus ?? 0;
+
   if (hex.has_heavy_vegetation) {
     bonus += 2;
   } else if (hex.has_light_vegetation) {
@@ -349,7 +352,7 @@ export async function executeGroundCombat(db, gameId, turn) {
   // -----------------------------------------------------------------------
   const [hexRows, fortBuildingRows] = await Promise.all([
     fetchAll(() => db.from('hexes')
-      .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation')
+      .select('hex_q, hex_r, has_light_vegetation, has_heavy_vegetation, terrain_type_config(defense_bonus)')
       .eq('game_id', gameId)),
     fetchAll(() => db.from('buildings')
       .select('hex_q, hex_r, type, current_hp, owner_faction_id')
@@ -381,6 +384,7 @@ export async function executeGroundCombat(db, gameId, turn) {
     const hex = hexDataByKey.get(key) ?? {
       has_light_vegetation: false,
       has_heavy_vegetation: false,
+      terrain_type_config: { defense_bonus: 0 },
     };
     const hexBuildings = fortBuildingsByHex.get(key) ?? [];
 

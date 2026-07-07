@@ -86,27 +86,6 @@ export default function HexGrid({
 
   const pixels = safeHexes.map(h => ({ ...h, ...hexToPixel(h.hex_q, h.hex_r, SIZE) }));
 
-  // Pre-compute road edges (center-to-center lines between adjacent road hexes).
-  // Done once per render; each undirected edge drawn only once.
-  const _hexByKey = new Map(pixels.map(h => [`${h.hex_q},${h.hex_r}`, h]));
-  const _roadEdgeSet = new Set();
-  const roadEdges = [];
-  for (const h of pixels) {
-    if (!h.has_road) continue;
-    for (const { q: nq, r: nr } of offsetNeighbors(h.hex_q, h.hex_r)) {
-      const nh = _hexByKey.get(`${nq},${nr}`);
-      if (!nh?.has_road) continue;
-      const ek = [`${h.hex_q},${h.hex_r}`, `${nq},${nr}`].sort().join('|');
-      if (_roadEdgeSet.has(ek)) continue;
-      _roadEdgeSet.add(ek);
-      roadEdges.push({
-        x1: h.x, y1: h.y, x2: nh.x, y2: nh.y,
-        isBridge: (h.terrain === 'water' && h.has_bridge) ||
-                  (nh.terrain === 'water' && nh.has_bridge),
-      });
-    }
-  }
-
   const xs = pixels.map(p => p.x);
   const ys = pixels.map(p => p.y);
   const minX = xs.length ? Math.min(...xs) - PAD : 0;
@@ -274,11 +253,6 @@ export default function HexGrid({
                 fill="#fbbf24" style={{ pointerEvents: 'none', userSelect: 'none' }}>★</text>
             )}
 
-            {/* Urban dot */}
-            {!isDark && h.has_urban && !h.has_settlement && (
-              <circle cx={cx + SIZE * 0.45} cy={cy - SIZE * 0.42} r={3} fill="#a78bfa" style={{ pointerEvents: 'none' }} />
-            )}
-
             {/* Terrain label (skip for settlements — name shown instead) */}
             {!isDark && !h.has_settlement && (
               <text x={cx} y={cy - SIZE * 0.35} textAnchor="middle" fontSize={10}
@@ -323,33 +297,6 @@ export default function HexGrid({
                 </g>
               );
             })}
-          </g>
-        );
-      })}
-
-      {/* Road + bridge layer — rendered after hex fills, before units/arrows */}
-      {roadEdges.map((e, i) => {
-        const ox = -minX + PAD / 2, oy = -minY + PAD / 2;
-        const x1 = e.x1 + ox, y1 = e.y1 + oy, x2 = e.x2 + ox, y2 = e.y2 + oy;
-        if (!e.isBridge) {
-          return (
-            <line key={`r${i}`} x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke="#1c1c1c" strokeWidth={2.5} strokeLinecap="round"
-              style={{ pointerEvents: 'none' }} />
-          );
-        }
-        // Bridge: darker brown line + two perpendicular crossbars
-        const dx = x2 - x1, dy = y2 - y1;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len === 0) return null;
-        const px = -dy / len * 7, py = dx / len * 7;
-        const b1x = x1 + dx * 0.33, b1y = y1 + dy * 0.33;
-        const b2x = x1 + dx * 0.67, b2y = y1 + dy * 0.67;
-        return (
-          <g key={`r${i}`} style={{ pointerEvents: 'none' }}>
-            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#5c1f00" strokeWidth={4} strokeLinecap="round" />
-            <line x1={b1x - px} y1={b1y - py} x2={b1x + px} y2={b1y + py} stroke="#5c1f00" strokeWidth={3} strokeLinecap="round" />
-            <line x1={b2x - px} y1={b2y - py} x2={b2x + px} y2={b2y + py} stroke="#5c1f00" strokeWidth={3} strokeLinecap="round" />
           </g>
         );
       })}

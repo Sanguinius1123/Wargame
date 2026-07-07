@@ -1,15 +1,12 @@
 // =============================================================
 // movement.js — Path validation and ground movement execution
 //
-// Movement scale: unit_type_config.move is user-facing (e.g. Infantry=2).
-// Internally we use ×3 scale so road costs (2/3 of terrain cost) resolve
-// to clean integers. Budget = unitType.move * 3.
-//
-// Terrain costs (×3 scale, from terrain_type_config):
-//   foot units  → foot_cost  / foot_road_cost
-//   mechanized  → mech_cost  / mech_road_cost  ('mechanized' in tags)
-//   water       → always impassable to ground units (foot_cost IS NULL)
-//   mountains   → mech_cost IS NULL → impassable to mechanized without road
+// Movement budget = unitType.move (direct, no internal scaling).
+// Terrain costs are direct integers from terrain_type_config:
+//   foot units  → foot_cost  (NULL = impassable)
+//   mechanized  → mech_cost  ('mechanized' in tags; NULL = impassable)
+//   water       → impassable to all ground units (foot_cost IS NULL)
+//   mountains   → mech_cost IS NULL → impassable to mechanized
 //   heavy veg   → has_heavy_vegetation = true → impassable to mechanized
 //
 // Single-step paths (1 waypoint after start) are always permitted even if
@@ -37,34 +34,24 @@ function detectionCheck(detRating, stealthRating, distance) {
 
 // ---------------------------------------------------------------------------
 // Cost to enter a single hex for a given unit type.
-// Returns Infinity for impassable hexes, otherwise the ×3 integer cost.
+// Returns Infinity for impassable hexes, otherwise the direct integer cost.
 // ---------------------------------------------------------------------------
 function enterCost(unitType, hex) {
   const isMech = Array.isArray(unitType.tags) && unitType.tags.includes('mechanized');
   const cfg = hex.terrain_type_config;
 
-  // Water is impassable to all ground units.
+  // Water is impassable to all ground units (foot_cost IS NULL).
   if (cfg.foot_cost == null) return Infinity;
 
   if (isMech) {
     // Heavy vegetation is impassable to mechanized units.
     if (hex.has_heavy_vegetation) return Infinity;
-
-    if (hex.has_road) {
-      // Road cost available → use it. Mountains become passable on roads.
-      if (cfg.mech_road_cost != null) return cfg.mech_road_cost;
-      // Road exists but no road cost defined for this terrain (shouldn't happen
-      // per schema, but fall through to bare mech cost).
-    }
-
-    // No road: mountains (mech_cost IS NULL) are impassable.
+    // Mountains and wetlands: mech_cost IS NULL → impassable.
     if (cfg.mech_cost == null) return Infinity;
     return cfg.mech_cost;
-  } else {
-    // Foot unit.
-    if (hex.has_road && cfg.foot_road_cost != null) return cfg.foot_road_cost;
-    return cfg.foot_cost; // foot_cost is never NULL per design
   }
+
+  return cfg.foot_cost;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,8 +61,7 @@ function enterCost(unitType, hex) {
 // path      : [{q, r}, ...] array of waypoints INCLUDING the starting hex
 //             (path[0] = origin, path[path.length-1] = destination)
 // hexesByKey: Map<"q,r", hex> where hex has:
-//               terrain_type_config: { foot_cost, mech_cost, foot_road_cost, mech_road_cost }
-//               has_road: boolean
+//               terrain_type_config: { foot_cost, mech_cost }
 //               has_heavy_vegetation: boolean
 //
 // Returns { valid: boolean, reason?: string }
@@ -85,7 +71,7 @@ export function validatePath(unitType, path, hexesByKey) {
     return { valid: false, reason: 'Path must have at least a start and one destination.' };
   }
 
-  const budget = unitType.move * 3;
+  const budget = unitType.move;
   const steps = path.length - 1; // number of hex transitions
 
   let totalCost = 0;
@@ -255,9 +241,8 @@ async function runPatrolIntercepts(db, gameId, turn, validMoves, unitPathMap) {
       // Skip if same faction as mover.
       if (patrol.faction_id === moverUnit.faction_id) continue;
 
-      // Compute patrol radius: mechanized = 2, foot = 1.
-      const patrolIsMech = Array.isArray(patrol.cfg.tags) && patrol.cfg.tags.includes('mechanized');
-      const radius = patrolIsMech ? 2 : 1;
+      // All ground patrols have radius 1 at strategic scale.
+      const radius = 1;
 
       // Check if the destination hex is within patrol zone.
       const patrolZone = hexesInRange(patrol.hex_q, patrol.hex_r, radius);
@@ -529,14 +514,11 @@ export async function executeGroundMoves(db, gameId, turn) {
         hex_q,
         hex_r,
         terrain,
-        has_road,
         has_heavy_vegetation,
         terrain_type_config!inner (
           name,
           foot_cost,
-          mech_cost,
-          foot_road_cost,
-          mech_road_cost
+          mech_cost
         )
       `)
       .eq('game_id', gameId));

@@ -61,7 +61,7 @@ function defenseBonus(unit, hex, hasFortificationBuilding = false) {
 // Is hex passable for a given unit type?
 // Returns true if the unit can enter the hex.
 // Ground units cannot enter Water (foot_cost IS NULL).
-// Mechanized units cannot enter Mountains without road (mech_cost IS NULL when no road)
+// Mechanized units cannot enter Mountains or Wetlands (mech_cost IS NULL)
 // or hexes with has_heavy_vegetation.
 function isPassable(unitTypeCfg, hex) {
   const isMech =
@@ -72,11 +72,6 @@ function isPassable(unitTypeCfg, hex) {
 
   if (isMech) {
     if (hex.has_heavy_vegetation) return false;
-    if (hex.has_road) {
-      // Road exists — check if road cost is defined for mechanized.
-      if (hex.terrain_type_config.mech_road_cost != null) return true;
-    }
-    // No usable road: mountains (mech_cost IS NULL) impassable.
     if (hex.terrain_type_config.mech_cost == null) return false;
   }
 
@@ -173,15 +168,13 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
     .select(`
       hex_q,
       hex_r,
-      has_road,
       has_light_vegetation,
       has_heavy_vegetation,
       terrain_type_config!inner (
         name,
         foot_cost,
         mech_cost,
-        foot_road_cost,
-        mech_road_cost
+        defense_bonus
       )
     `)
     .eq('game_id', gameId);

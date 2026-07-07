@@ -2,22 +2,15 @@
 // rangedFire.js — Phase 3 ranged fire step
 //
 // Runs AFTER all ground movement completes but BEFORE close combat.
-// Two simultaneous events are resolved in a single pass:
+// Resolves bombard orders only (Artillery, Battleship).
+// Auto ranged fire is not used in the strategic design — combat is close-only.
 //
-//   A) Bombard orders — directed indirect fire (Artillery, Battleship)
-//      Fire against a specific target hex (units + infra).
-//      Artillery: bombard_to_hit, bombard_pen, 1 die per unit vs units,
-//                 1 die per unit vs infra. Stationary only (not in movedUnitIds).
-//      Bombardment is indiscriminate — can hit any unit in target hex.
+// Bombard orders — directed indirect fire:
+//   Fire against a specific target hex (units + infra).
+//   Artillery: bombard_to_hit, bombard_pen, 1 die per unit vs units+infra.
+//   Stationary only (not in movedUnitIds). Indiscriminate.
 //
-//   B) Auto ranged fire — no order required
-//      All units with atk_range > 0 AND to_hit != null that:
-//        • do NOT have a bombard or fortify order this turn, AND
-//        • are NOT in the same hex as any enemy (those fight in close combat)
-//      Fire at ALL detected enemy units within atk_range (distance > 0).
-//      Proportional distribution: weight = unit_count / distance.
-//
-// Dice resolution (identical to combat.js):
+// Dice resolution:
 //   Attack: 2d6 ≤ to_hit → hit
 //   Save:   2d6 ≤ (defense + defense_bonus − penetration) → saved; else 1 casualty
 //
@@ -26,7 +19,6 @@
 
 import { defenseBonus, distributeDice } from './combat.js';
 import { fetchAll } from '../db.js';
-import { handleBridgeCollapse } from './bridgeCollapse.js';
 
 // ---------------------------------------------------------------------------
 // roll2d6
@@ -191,7 +183,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   let hexRows;
   try {
     hexRows = await fetchAll(() => db.from('hexes')
-      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation')
+      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(defense_bonus)')
       .eq('game_id', gameId));
   } catch (e) {
     return {
@@ -243,11 +235,6 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     fm.get(unit.faction_id).push(unit);
   }
 
-  // Set of hexKeys that are contested (≥2 factions).
-  const contestedHexKeys = new Set();
-  for (const [key, fm] of hexFactionMap) {
-    if (fm.size >= 2) contestedHexKeys.add(key);
-  }
 
   // -------------------------------------------------------------------------
   // 7. Accumulate all dice rolls — phase A (bombard) and B (auto ranged fire).
@@ -299,6 +286,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     const targetHex = hexDataByKey.get(targetHexKey) ?? {
       has_light_vegetation: false,
       has_heavy_vegetation: false,
+      terrain_type_config: { defense_bonus: 0 },
     };
 
     // Collect all units in target hex.
@@ -414,121 +402,6 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   }
 
   // =========================================================================
-  // Phase B — Auto ranged fire
-  // =========================================================================
-  // Eligible units: atk_range > 0, to_hit != null, no bombard/fortify order,
-  // NOT in a contested hex (those fight in close combat, not ranged fire).
-  for (const unit of allUnits) {
-    const cfg = unitTypeById.get(unit.unit_type_id);
-    if (!cfg) continue;
-
-    // Must have direct-fire capability.
-    if (cfg.atk_range == null || cfg.atk_range <= 0) continue;
-    if (cfg.to_hit == null) continue;
-
-    // Skip if it has a bombard or fortify order.
-    if (bombardOrders.has(unit.id)) continue;
-    if (fortifyOrderUnitIds.has(unit.id)) continue;
-
-    // Skip if in a contested hex (fight in close combat instead).
-    const ownHexKey = `${unit.hex_q},${unit.hex_r}`;
-    if (contestedHexKeys.has(ownHexKey)) continue;
-
-    // Find all enemy units within atk_range.
-    const enemyTargets = allUnits.filter((target) => {
-      if (target.faction_id === unit.faction_id) return false; // same faction
-      const dist = hexDist(unit.hex_q, unit.hex_r, target.hex_q, target.hex_r);
-      return dist > 0 && dist <= cfg.atk_range;
-    });
-
-    if (enemyTargets.length === 0) continue;
-
-    // Proportional fire: weight = unit_count / distance.
-    // Each firing unit contributes effectiveCount dice total.
-    const totalDice = effectiveCount(unit, cfg);
-
-    const weightedTargets = enemyTargets.map((target) => {
-      const targetCfgForCount = unitTypeById.get(target.unit_type_id);
-      const dist = hexDist(unit.hex_q, unit.hex_r, target.hex_q, target.hex_r);
-      return {
-        id: target.id,
-        weight: effectiveCount(target, targetCfgForCount) / dist,
-      };
-    });
-
-    const dicePerTarget = distributeDice(totalDice, weightedTargets);
-
-    const toHit = cfg.to_hit;
-    const pen = cfg.penetration ?? 0;
-
-    for (const target of enemyTargets) {
-      const dice = dicePerTarget.get(target.id) ?? 0;
-      if (dice === 0) continue;
-
-      const targetCfg = unitTypeById.get(target.unit_type_id);
-      if (!targetCfg) continue;
-
-      const targetHexKey = `${target.hex_q},${target.hex_r}`;
-      const targetHex = hexDataByKey.get(targetHexKey) ?? {
-        has_light_vegetation: false,
-        has_heavy_vegetation: false,
-      };
-      const hasFortBuilding = (buildingsByHex.get(targetHexKey) ?? []).some(
-        b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === target.faction_id
-      );
-      const bonus = defenseBonus(target, targetHex, hasFortBuilding);
-
-      let hits = 0;
-      let casCount = 0;
-
-      for (let d = 0; d < dice; d++) {
-        const result = rollAttackAndSave(toHit, targetCfg.defense, bonus, pen);
-        if (result.hit) hits++;
-        if (result.casualty) {
-          casualties.set(target.id, (casualties.get(target.id) ?? 0) + 1);
-          casCount++;
-        }
-      }
-
-      rangedEngagements.push({
-        firerUnitId: unit.id,
-        firerFactionId: unit.faction_id,
-        targetUnitId: target.id,
-        targetFactionId: target.faction_id,
-        dice,
-        hits,
-        casualties: casCount,
-      });
-
-      if (hits > 0 || casCount > 0) {
-        combatLogInserts.push({
-          game_id: gameId,
-          turn,
-          phase: 3,
-          hex_q: target.hex_q,
-          hex_r: target.hex_r,
-          log_type: 'ranged_fire',
-          faction_id: unit.faction_id,
-          data: {
-            firer_unit_id: unit.id,
-            firer_faction_id: unit.faction_id,
-            firer_hex: { q: unit.hex_q, r: unit.hex_r },
-            target_unit_id: target.id,
-            target_faction_id: target.faction_id,
-            target_hex: { q: target.hex_q, r: target.hex_r },
-            atk_range: cfg.atk_range,
-            dice,
-            to_hit: toHit,
-            pen,
-            hits,
-            casualties: casCount,
-          },
-        });
-      }
-    }
-  }
-
-  // =========================================================================
   // 8. Apply casualties (after ALL dice rolled).
   // =========================================================================
   for (const [unitId, count] of casualties) {
@@ -594,18 +467,6 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     if (newHp <= 0) {
       const { error } = await db.from('buildings').delete().eq('id', buildingId);
       if (error) errors.push(`Failed to delete building ${buildingId}: ${error.message}`);
-
-      if (building.type === 'bridge') {
-        const { logEntries: collapseLog, errors: collapseErrors } =
-          await handleBridgeCollapse(db, gameId, building.hex_q, building.hex_r, turn, hexDataByKey);
-        errors.push(...collapseErrors);
-        combatLogInserts.push({
-          game_id: gameId, turn, phase: 3,
-          hex_q: building.hex_q, hex_r: building.hex_r,
-          log_type: 'bridge_collapse',
-          data: { hex: { q: building.hex_q, r: building.hex_r }, units: collapseLog },
-        });
-      }
     } else {
       const { error } = await db
         .from('buildings')
