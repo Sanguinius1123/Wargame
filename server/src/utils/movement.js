@@ -241,8 +241,9 @@ async function runPatrolIntercepts(db, gameId, turn, validMoves, unitPathMap) {
       // Skip if same faction as mover.
       if (patrol.faction_id === moverUnit.faction_id) continue;
 
-      // All ground patrols have radius 1 at strategic scale.
-      const radius = 1;
+      // Foot radius 1, mechanized radius 2 (per DESIGN.md patrol rules).
+      const isMechPatrol = Array.isArray(patrol.cfg?.tags) && patrol.cfg.tags.includes('mechanized');
+      const radius = isMechPatrol ? 2 : 1;
 
       // Check if the destination hex is within patrol zone.
       const patrolZone = hexesInRange(patrol.hex_q, patrol.hex_r, radius);

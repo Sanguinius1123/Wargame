@@ -9,27 +9,44 @@ const router = Router();
 router.get('/', requireAuth, async (req, res) => {
   const { data, error } = await adminDb
     .from('game_participants')
-    .select('role, games(id, name, current_turn, current_phase, auto_resolve, created_at)')
+    .select('role, turn_ready, games(id, name, current_turn, current_phase, auto_resolve, created_at)')
     .eq('profile_id', req.user.id);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data.map(d => ({ ...d.games, role: d.role })));
+  res.json(data.map(d => ({ ...d.games, role: d.role, turn_ready: d.turn_ready })));
 });
 
-// POST /api/games — GM creates a new game; optional map_id seeds hexes from a saved template
+// POST /api/games — GM creates a new game
+// Body: { name, setting_id (required), map_id (optional) }
 router.post('/', requireGM, async (req, res) => {
-  const { name, map_width = 20, map_height = 20, map_id } = req.body;
+  const { name, setting_id, map_width = 20, map_height = 20, map_id } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+  if (!setting_id) return res.status(400).json({ error: 'setting_id required' });
+
+  // Verify setting exists
+  const { data: setting } = await adminDb.from('settings').select('id').eq('id', setting_id).single();
+  if (!setting) return res.status(400).json({ error: 'setting not found' });
 
   const { data: game, error } = await adminDb
     .from('games')
-    .insert({ name, map_width, map_height })
+    .insert({ name, map_width, map_height, setting_id })
     .select()
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
 
   await adminDb.from('game_participants').insert({ game_id: game.id, profile_id: req.user.id, role: 'gm' });
+
+  // Copy unit types from the chosen setting's templates
+  const { data: templates } = await adminDb
+    .from('unit_type_templates')
+    .select('name, tags, to_hit, defense, penetration, atk_range, move, los, mat_cost, man_cost, slots, stealth_rating, detection_rating, atk_dice, hp, sonar_range, carrier_slots, overwatch_to_hit, overwatch_pen, overwatch_range, bombard_range, bombard_to_hit, bombard_pen')
+    .eq('setting_id', setting_id);
+  if (templates?.length) {
+    await adminDb.from('unit_type_config').insert(
+      templates.map(t => ({ ...t, game_id: game.id }))
+    );
+  }
 
   // Optionally seed hexes from a saved map template
   if (map_id) {
@@ -78,7 +95,7 @@ router.get('/:gameId/factions', requireAuth, async (req, res) => {
 router.get('/:gameId/participants', requireAuth, async (req, res) => {
   const { data, error } = await adminDb
     .from('game_participants')
-    .select('role, profiles(id, username)')
+    .select('role, turn_ready, profile_id, profiles(id, username)')
     .eq('game_id', req.params.gameId);
 
   if (error) return res.status(500).json({ error: error.message });
@@ -87,15 +104,23 @@ router.get('/:gameId/participants', requireAuth, async (req, res) => {
 
 // POST /api/games/:gameId/finish-turn — player marks ready for next turn
 // When all players (role='player') are ready, automatically advances the turn.
+// GMs may pass { view_as_profile_id } to mark a player's turn ready on their behalf.
 router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
   const { gameId } = req.params;
+  const { view_as_profile_id } = req.body ?? {};
+
+  // GMs can submit on behalf of a player when using viewAs
+  let profileId = req.user.id;
+  if (view_as_profile_id && req.user.global_role === 'gm') {
+    profileId = view_as_profile_id;
+  }
 
   // Mark this player ready
   const { error: markErr } = await adminDb
     .from('game_participants')
     .update({ turn_ready: true })
     .eq('game_id', gameId)
-    .eq('profile_id', req.user.id);
+    .eq('profile_id', profileId);
 
   if (markErr) return res.status(500).json({ error: markErr.message });
 

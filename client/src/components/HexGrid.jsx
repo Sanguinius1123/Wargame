@@ -78,13 +78,31 @@ export default function HexGrid({
   movePath = [],
   bombardMode = false,
   bombardTargetKey = null,
+  buildMode = false,
   onPathClick,
+  centerOn = null,   // { q, r } — when this changes, pan the map to that hex
 }) {
   const safeHexes = hexes ?? [];
   const SIZE = 36;
   const PAD = SIZE * 2;
 
   const pixels = safeHexes.map(h => ({ ...h, ...hexToPixel(h.hex_q, h.hex_r, SIZE) }));
+
+  // Pre-compute railroad edges between adjacent railroad hexes (undirected, drawn once).
+  const _railHexByKey = new Map(pixels.map(h => [`${h.hex_q},${h.hex_r}`, h]));
+  const _railEdgeSet = new Set();
+  const railEdges = [];
+  for (const h of pixels) {
+    if (!h.has_railroad) continue;
+    for (const { q: nq, r: nr } of offsetNeighbors(h.hex_q, h.hex_r)) {
+      const nh = _railHexByKey.get(`${nq},${nr}`);
+      if (!nh?.has_railroad) continue;
+      const ek = [`${h.hex_q},${h.hex_r}`, `${nq},${nr}`].sort().join('|');
+      if (_railEdgeSet.has(ek)) continue;
+      _railEdgeSet.add(ek);
+      railEdges.push({ x1: h.x, y1: h.y, x2: nh.x, y2: nh.y });
+    }
+  }
 
   const xs = pixels.map(p => p.x);
   const ys = pixels.map(p => p.y);
@@ -95,6 +113,16 @@ export default function HexGrid({
 
   const [vb, setVb] = useState({ x: minX, y: minY, width: natW, height: natH });
   useEffect(() => setVb({ x: minX, y: minY, width: natW, height: natH }), [minX, minY, natW, natH]);
+
+  // Pan to a specific hex when centerOn changes
+  useEffect(() => {
+    if (!centerOn) return;
+    const p = pixels.find(h => h.hex_q === centerOn.q && h.hex_r === centerOn.r);
+    if (!p) return;
+    const cx = p.x - minX + PAD / 2;
+    const cy = p.y - minY + PAD / 2;
+    setVb(prev => ({ ...prev, x: cx - prev.width / 2, y: cy - prev.height / 2 }));
+  }, [centerOn]);
 
   const svgRef = useRef(null);
   const dragRef = useRef(null);
@@ -132,12 +160,12 @@ export default function HexGrid({
 
   const handleHexClick = useCallback((h) => {
     if (dragRef.current?.moved) return;
-    if (moveMode || bombardMode) {
+    if (moveMode || bombardMode || buildMode) {
       onPathClick?.(h);
     } else {
       onSelect?.(h);
     }
-  }, [onSelect, moveMode, bombardMode, onPathClick]);
+  }, [onSelect, moveMode, bombardMode, buildMode, onPathClick]);
 
   const handleHexDbl = useCallback((h, e) => {
     e.stopPropagation();
@@ -295,6 +323,37 @@ export default function HexGrid({
                     {u.type?.[0] ?? '?'}{u.quantity > 1 ? u.quantity : ''}
                   </text>
                 </g>
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* Railroad layer — rendered after hex fills, before units/arrows */}
+      {railEdges.map((e, i) => {
+        const ox = -minX + PAD / 2, oy = -minY + PAD / 2;
+        const x1 = e.x1 + ox, y1 = e.y1 + oy;
+        const x2 = e.x2 + ox, y2 = e.y2 + oy;
+        const dx = x2 - x1, dy = y2 - y1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len === 0) return null;
+        // Unit perpendicular vector for crossties
+        const px = -dy / len, py = dx / len;
+        // Draw 5 evenly-spaced crossties along the edge
+        const ties = [0.2, 0.35, 0.5, 0.65, 0.8];
+        return (
+          <g key={`rail${i}`} style={{ pointerEvents: 'none' }}>
+            {/* Main rail line */}
+            <line x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke="#b0bec5" strokeWidth={2} strokeLinecap="round" />
+            {/* Crossties */}
+            {ties.map((t, j) => {
+              const cx2 = x1 + dx * t, cy2 = y1 + dy * t;
+              return (
+                <line key={j}
+                  x1={cx2 - px * 5} y1={cy2 - py * 5}
+                  x2={cx2 + px * 5} y2={cy2 + py * 5}
+                  stroke="#78909c" strokeWidth={2.5} strokeLinecap="round" />
               );
             })}
           </g>

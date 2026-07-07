@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import HexGrid from './HexGrid';
 
@@ -95,6 +95,10 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [bombardMode, setBombardMode] = useState(false);
   const [bombardTarget, setBombardTarget] = useState(null);
 
+  // Retreat-order state
+  const [retreatMode, setRetreatMode] = useState(false);
+  const [retreatTarget, setRetreatTarget] = useState(null);
+
   // Build-order state (Supply truck)
   const [buildMode, setBuildMode] = useState(false);
   const [buildTarget, setBuildTarget] = useState(null);
@@ -106,6 +110,13 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
+
+  // Ordered-units tracking: unit IDs that already have orders this turn
+  const [orderedUnitIds, setOrderedUnitIds] = useState(new Set());
+  // Which hex the map should pan to (changed each time "Next Unit" is clicked)
+  const [centerOn, setCenterOn] = useState(null);
+  // Cycling index for "Next Unit" button
+  const nextUnitIdxRef = useRef(0);
 
   // Production state (player only)
   const [unitTypes, setUnitTypes] = useState([]);
@@ -121,6 +132,16 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [flightGroupTargetR, setFlightGroupTargetR] = useState(null);
   const [flightGroupMsg, setFlightGroupMsg] = useState('');
 
+  const loadOrderedUnits = useCallback(async () => {
+    if (isGM && !viewAsFactionId) return;
+    const headers = await authHeader();
+    const r = await fetch(`${SERVER}/api/map/${gameId}/ordered-units`, { headers });
+    if (r.ok) {
+      const d = await r.json();
+      setOrderedUnitIds(new Set(d.unit_ids ?? []));
+    }
+  }, [gameId, isGM, viewAsFactionId]);
+
   const load = useCallback(async () => {
     const headers = await authHeader();
     const url = viewAsFactionId
@@ -129,7 +150,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     const r = await fetch(url, { headers });
     if (r.ok) setHexes(await r.json());
     setLoading(false);
-  }, [gameId, viewAsFactionId, refreshKey]);
+    loadOrderedUnits();
+  }, [gameId, viewAsFactionId, refreshKey, loadOrderedUnits]);
 
   const loadProduction = useCallback(async () => {
     if (isGM) return;
@@ -162,18 +184,63 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
 
-  // Fetch orders for a given unit id; clears if null
-  const fetchOrders = useCallback(async (unitId) => {
-    if (!unitId) { setCurrentOrders([]); return; }
+  // Fetch orders for a given unit id; clears if null.
+  // If `unitHex` is provided, reconstructs movePath from any saved move orders.
+  const fetchOrders = useCallback(async (unitId, unitHex) => {
+    if (!unitId) { setCurrentOrders([]); setMovePath([]); return; }
     const headers = await authHeader();
     const r = await fetch(`${SERVER}/api/map/${gameId}/orders/${unitId}`, { headers });
     if (r.ok) {
       const d = await r.json();
-      setCurrentOrders(d.orders ?? []);
+      const orders = d.orders ?? [];
+      setCurrentOrders(orders);
+      // Rebuild the move path arrow from saved move orders
+      const moveSteps = orders
+        .filter(o => o.order_type === 'move')
+        .sort((a, b) => a.sequence - b.sequence);
+      if (moveSteps.length > 0 && unitHex) {
+        setMovePath([
+          { q: unitHex.hex_q, r: unitHex.hex_r },
+          ...moveSteps.map(o => ({ q: o.to_hex_q, r: o.to_hex_r })),
+        ]);
+      } else if (!unitHex) {
+        // No hex provided — don't touch movePath (called mid-flow like after bombard confirm)
+      } else {
+        setMovePath([]);
+      }
     } else {
       setCurrentOrders([]);
+      setMovePath([]);
     }
   }, [gameId]);
+
+  const jumpToNextUnit = useCallback(() => {
+    const ownFactionId = viewAsFactionId ?? playerFactionId;
+    if (!ownFactionId) return;
+    const unordered = [];
+    for (const hex of hexes) {
+      const unit = hex.units?.find(u => u.factionId === ownFactionId && !orderedUnitIds.has(u.id));
+      if (unit) unordered.push({ hex, unit });
+    }
+    if (unordered.length === 0) return;
+    const idx = nextUnitIdxRef.current % unordered.length;
+    nextUnitIdxRef.current = idx + 1;
+    const { hex, unit } = unordered[idx];
+    setSelected(hex);
+    setSelectedUnit(unit);
+    setMoveMode(false);
+    setMovePath([]);
+    setBombardMode(false);
+    setBombardTarget(null);
+    setBuildMode(false);
+    setBuildTarget(null);
+    setBuildStructureType('');
+    setBridgeBuildMode(false);
+    setBridgeBuildPicks([]);
+    setCurrentOrders([]);
+    fetchOrders(unit.id, hex);
+    setCenterOn({ q: hex.hex_q, r: hex.hex_r });
+  }, [hexes, orderedUnitIds, viewAsFactionId, playerFactionId, fetchOrders]);
 
   // Called when player clicks a hex in normal mode
   const handleSelect = useCallback((hex) => {
@@ -207,7 +274,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setFlightGroupTargetQ(null);
       setFlightGroupTargetR(null);
       setCurrentOrders([]);
-      fetchOrders(unit?.id ?? null);
+      fetchOrders(unit?.id ?? null, hex);
     }
   }, [isGM, viewAsFactionId, fetchOrders, onHexSelect]);
 
@@ -222,6 +289,14 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       } else {
         setFlightGroupPath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
       }
+    } else if (retreatMode && selected) {
+      // Only accept hexes adjacent to the unit's current position with no enemy units
+      const adjKeys = new Set(offsetNeighbors(selected.hex_q, selected.hex_r).map(n => `${n.q},${n.r}`));
+      if (!adjKeys.has(`${hex.hex_q},${hex.hex_r}`)) return;
+      const ownFId = viewAsFactionId ?? playerFactionId;
+      const hasEnemy = (hex.units ?? []).some(u => u.factionId !== ownFId);
+      if (hasEnemy) return;
+      setRetreatTarget({ q: hex.hex_q, r: hex.hex_r });
     } else if (moveMode) {
       setMovePath(prev => [...prev, { q: hex.hex_q, r: hex.hex_r }]);
     } else if (bombardMode) {
@@ -252,7 +327,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
         setBridgeBuildPicks([waterPick, { q: hex.hex_q, r: hex.hex_r }]);
       }
     }
-  }, [flightGroupMode, flightGroupMission, flightGroupTargetQ, moveMode, bombardMode, buildMode, bridgeBuildMode, bridgeBuildPicks, selected, hexes]);
+  }, [flightGroupMode, flightGroupMission, flightGroupTargetQ, moveMode, bombardMode, buildMode, bridgeBuildMode, bridgeBuildPicks, retreatMode, selected, hexes, viewAsFactionId, playerFactionId]);
 
   const enterMoveMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -269,9 +344,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   const cancelMove = useCallback(() => {
     setMoveMode(false);
-    setMovePath([]);
-    fetchOrders(selectedUnit?.id ?? null);
-  }, [selectedUnit, fetchOrders]);
+    fetchOrders(selectedUnit?.id ?? null, selected);
+  }, [selectedUnit, selected, fetchOrders]);
 
   const confirmMove = useCallback(async () => {
     if (!selectedUnit || movePath.length < 2) return;
@@ -287,14 +361,15 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       }),
     });
     setMoveMode(false);
-    setMovePath([]);
     setSplitMode(false);
     setSplitQty(1);
-    setCurrentOrders([]);
-    setSelectedUnit(null);
-    setSelected(null);
+    setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
+    // Keep the unit selected and re-fetch its orders — this reconstructs the
+    // confirmed path arrow via fetchOrders so it stays visible after confirmation.
+    await fetchOrders(selectedUnit.id, selected);
     load();
-  }, [selectedUnit, movePath, splitMode, splitQty, gameId, viewAsFactionId, load]);
+    loadOrderedUnits();
+  }, [selectedUnit, movePath, splitMode, splitQty, gameId, viewAsFactionId, load, fetchOrders, selected, loadOrderedUnits]);
 
   const enterSplitMode = useCallback(() => {
     if (!selectedUnit || !selectedUnit.quantity || selectedUnit.quantity <= 1) return;
@@ -338,11 +413,26 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     });
     setBombardMode(false);
     setBombardTarget(null);
+    setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
     await fetchOrders(selectedUnit.id);
-  }, [selectedUnit, bombardTarget, gameId, viewAsFactionId, fetchOrders]);
+    loadOrderedUnits();
+  }, [selectedUnit, bombardTarget, gameId, viewAsFactionId, fetchOrders, loadOrderedUnits]);
 
-  const retreatUnit = useCallback(async () => {
+  const enterRetreatMode = useCallback(() => {
     if (!selectedUnit) return;
+    setRetreatMode(true);
+    setRetreatTarget(null);
+    setCurrentOrders([]);
+  }, [selectedUnit]);
+
+  const cancelRetreat = useCallback(() => {
+    setRetreatMode(false);
+    setRetreatTarget(null);
+    fetchOrders(selectedUnit?.id ?? null, selected);
+  }, [selectedUnit, selected, fetchOrders]);
+
+  const confirmRetreat = useCallback(async () => {
+    if (!selectedUnit || !retreatTarget) return;
     const headers = await authHeader();
     await fetch(`${SERVER}/api/map/${gameId}/orders`, {
       method: 'POST',
@@ -350,11 +440,17 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       body: JSON.stringify({
         unit_id: selectedUnit.id,
         order_type: 'retreat',
+        to_hex_q: retreatTarget.q,
+        to_hex_r: retreatTarget.r,
         ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
       }),
     });
-    await fetchOrders(selectedUnit.id);
-  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
+    setRetreatMode(false);
+    setRetreatTarget(null);
+    setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
+    await fetchOrders(selectedUnit.id, selected);
+    loadOrderedUnits();
+  }, [selectedUnit, retreatTarget, gameId, viewAsFactionId, selected, fetchOrders, loadOrderedUnits]);
 
   const pursueUnit = useCallback(async () => {
     if (!selectedUnit) return;
@@ -382,7 +478,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     setMovePath([]);
     setCurrentOrders([]);
     load();
-  }, [selectedUnit, gameId, load]);
+    loadOrderedUnits();
+  }, [selectedUnit, gameId, load, loadOrderedUnits]);
 
   const fortifyUnit = useCallback(async () => {
     if (!selectedUnit) return;
@@ -396,8 +493,10 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
         ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
       }),
     });
+    setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
     await fetchOrders(selectedUnit.id);
-  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders]);
+    loadOrderedUnits();
+  }, [selectedUnit, gameId, viewAsFactionId, fetchOrders, loadOrderedUnits]);
 
   const setPatrolOrder = useCallback(async (patrolValue) => {
     if (!selectedUnit) return;
@@ -574,29 +673,59 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     }
   }, [gameId, loadProduction]);
 
+  const ownFactionId = viewAsFactionId ?? playerFactionId;
+  const isPlayerMode = !isGM || !!viewAsFactionId;
+  const unorderedCount = isPlayerMode && ownFactionId
+    ? hexes.reduce((n, hex) => {
+        const unit = hex.units?.find(u => u.factionId === ownFactionId && !orderedUnitIds.has(u.id));
+        return unit ? n + 1 : n;
+      }, 0)
+    : 0;
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, height: '100%' }}>
       {/* Map */}
-      <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 180px)', minHeight: 500, position: 'relative' }}>
-        {loading
-          ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
-          : <HexGrid
-              hexes={hexes}
-              onSelect={handleSelect}
-              panZoom
-              selectedKey={selectedKey}
-              moveMode={moveMode}
-              movePath={movePath}
-              bombardMode={bombardMode}
-              bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
-              buildMode={buildMode || bridgeBuildMode || flightGroupMode}
-              buildTargetKey={
-                buildTarget ? `${buildTarget.q},${buildTarget.r}` :
-                (flightGroupTargetQ !== null ? `${flightGroupTargetQ},${flightGroupTargetR}` : null)
-              }
-              onPathClick={handleModeClick}
-            />
-        }
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Next Unit toolbar */}
+        {isPlayerMode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={jumpToNextUnit}
+              disabled={unorderedCount === 0}
+              style={{
+                background: unorderedCount > 0 ? '#1d4ed8' : '#1e293b',
+                border: 'none', borderRadius: 4, padding: '6px 14px',
+                color: unorderedCount > 0 ? '#e2e8f0' : '#475569',
+                fontWeight: 600, fontSize: 12,
+                cursor: unorderedCount > 0 ? 'pointer' : 'default',
+              }}
+            >
+              Next Unit {unorderedCount > 0 ? `(${unorderedCount} need orders)` : '(all ordered)'}
+            </button>
+          </div>
+        )}
+        <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 215px)', minHeight: 480, position: 'relative' }}>
+          {loading
+            ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
+            : <HexGrid
+                hexes={hexes}
+                onSelect={handleSelect}
+                panZoom
+                selectedKey={selectedKey}
+                moveMode={moveMode}
+                movePath={movePath}
+                bombardMode={bombardMode}
+                bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
+                buildMode={buildMode || bridgeBuildMode || flightGroupMode || retreatMode}
+                buildTargetKey={
+                  buildTarget ? `${buildTarget.q},${buildTarget.r}` :
+                  (flightGroupTargetQ !== null ? `${flightGroupTargetQ},${flightGroupTargetR}` : null)
+                }
+                onPathClick={handleModeClick}
+                centerOn={centerOn}
+              />
+          }
+        </div>
       </div>
 
       {/* Detail panel */}
@@ -633,7 +762,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onCancelBridgeBuild={cancelBridgeBuild}
               onClearOrders={clearOrders}
               onFortify={fortifyUnit}
-              onRetreat={retreatUnit}
+              onEnterRetreat={enterRetreatMode}
+              onConfirmRetreat={confirmRetreat}
+              onCancelRetreat={cancelRetreat}
+              retreatMode={retreatMode}
+              retreatTarget={retreatTarget}
               onPursue={pursueUnit}
               onRepair={repairUnit}
               currentOrders={currentOrders}
@@ -655,6 +788,20 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onCancelFlightGroup={cancelFlightGroup}
               onCancelFlightGroupById={cancelFlightGroupById}
               onSetPatrol={setPatrolOrder}
+              onSelectUnit={(unit) => {
+                setSelectedUnit(unit);
+                setMoveMode(false);
+                setMovePath([]);
+                setBombardMode(false);
+                setBombardTarget(null);
+                setCurrentOrders([]);
+                fetchOrders(unit.id, selected);
+              }}
+              splitMode={splitMode}
+              splitQty={splitQty}
+              onEnterSplitMode={enterSplitMode}
+              onCancelSplit={cancelSplit}
+              onSplitQtyChange={setSplitQty}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -701,7 +848,11 @@ function HexDetail({
   onCancelBridgeBuild,
   onClearOrders,
   onFortify,
-  onRetreat,
+  onEnterRetreat,
+  onConfirmRetreat,
+  onCancelRetreat,
+  retreatMode = false,
+  retreatTarget = null,
   onPursue,
   onRepair,
   currentOrders,
@@ -723,6 +874,12 @@ function HexDetail({
   onCancelFlightGroup,
   onCancelFlightGroupById,
   onSetPatrol,
+  onSelectUnit,
+  splitMode = false,
+  splitQty = 1,
+  onEnterSplitMode,
+  onCancelSplit,
+  onSplitQtyChange,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -823,13 +980,33 @@ function HexDetail({
           {Object.entries(unitsByFaction).map(([fname, { color, units }]) => (
             <div key={fname} style={{ marginBottom: 10 }}>
               <p style={{ ...STAT_LABEL, color: color ?? '#60a5fa' }}>{fname}</p>
-              {units.map((u, i) => (
-                isGM
-                  ? <GMUnitRow key={u.id ?? i} unit={u} gameId={gameId} onRefresh={onRefresh} />
-                  : <p key={u.id ?? i} style={{ color: '#e2e8f0', fontSize: 13 }}>
+              {units.map((u, i) => {
+                const isOwn = u.factionId === playerFactionId;
+                const isSelected = selectedUnit?.id === u.id;
+                if (isGM) return <GMUnitRow key={u.id ?? i} unit={u} gameId={gameId} onRefresh={onRefresh} />;
+                if (isOwn && onSelectUnit) {
+                  return (
+                    <button
+                      key={u.id ?? i}
+                      onClick={() => onSelectUnit(u)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        background: isSelected ? '#1e3a5f' : 'none',
+                        border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                        borderRadius: 4, padding: '3px 6px', marginBottom: 2,
+                        color: '#e2e8f0', fontSize: 13, cursor: 'pointer',
+                      }}
+                    >
                       {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
-                    </p>
-              ))}
+                    </button>
+                  );
+                }
+                return (
+                  <p key={u.id ?? i} style={{ color: '#e2e8f0', fontSize: 13 }}>
+                    {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
+                  </p>
+                );
+              })}
             </div>
           ))}
 
@@ -865,7 +1042,11 @@ function HexDetail({
               onCancelBridgeBuild={onCancelBridgeBuild}
               onClearOrders={onClearOrders}
               onFortify={onFortify}
-              onRetreat={onRetreat}
+              onEnterRetreat={onEnterRetreat}
+              onConfirmRetreat={onConfirmRetreat}
+              onCancelRetreat={onCancelRetreat}
+              retreatMode={retreatMode}
+              retreatTarget={retreatTarget}
               onPursue={onPursue}
               onRepair={onRepair}
               currentOrders={currentOrders}
@@ -874,9 +1055,9 @@ function HexDetail({
               onSetPatrol={onSetPatrol}
               splitMode={splitMode}
               splitQty={splitQty}
-              onEnterSplitMode={enterSplitMode}
-              onCancelSplit={cancelSplit}
-              onSplitQtyChange={setSplitQty}
+              onEnterSplitMode={onEnterSplitMode}
+              onCancelSplit={onCancelSplit}
+              onSplitQtyChange={onSplitQtyChange}
             />
           )}
 
@@ -1069,7 +1250,11 @@ function OrderPanel({
   onCancelBridgeBuild,
   onClearOrders,
   onFortify,
-  onRetreat,
+  onEnterRetreat,
+  onConfirmRetreat,
+  onCancelRetreat,
+  retreatMode = false,
+  retreatTarget = null,
   onPursue,
   onRepair,
   currentOrders,
@@ -1102,7 +1287,7 @@ function OrderPanel({
     orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
   }
 
-  const inAnyMode = moveMode || bombardMode || buildMode || bridgeBuildMode || splitMode;
+  const inAnyMode = moveMode || bombardMode || buildMode || bridgeBuildMode || splitMode || retreatMode;
 
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
@@ -1204,6 +1389,26 @@ function OrderPanel({
         </div>
       )}
 
+      {/* Retreat mode */}
+      {retreatMode && (
+        <div>
+          <p style={{ color: '#fca5a5', fontSize: 11, marginBottom: 8 }}>
+            Click an adjacent non-enemy hex to retreat to.
+            {retreatTarget ? ` → (${retreatTarget.q}, ${retreatTarget.r})` : ''}
+          </p>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              style={{ ...BTN.base, background: '#7f1d1d', color: '#fca5a5', opacity: retreatTarget ? 1 : 0.5 }}
+              disabled={!retreatTarget}
+              onClick={onConfirmRetreat}
+            >
+              Confirm Retreat
+            </button>
+            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelRetreat}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Build mode (Supply truck) */}
       {buildMode && (
         <div>
@@ -1253,8 +1458,8 @@ function OrderPanel({
             <>
               <button
                 style={{ ...BTN.base, background: '#7f1d1d', color: '#fca5a5' }}
-                onClick={onRetreat}
-                title="Retreat: Move to an adjacent non-enemy hex. You will take parting fire as you leave, but do not fight back. Invalid if surrounded."
+                onClick={onEnterRetreat}
+                title="Retreat: Click an adjacent non-enemy hex to set your retreat destination."
               >
                 Retreat
               </button>

@@ -48,12 +48,27 @@ export default function GameView() {
     ]);
     if (gr.ok) {
       const games = await gr.json();
-      setGame(games.find(g => g.id === gameId));
+      const current = games.find(g => g.id === gameId);
+      setGame(current);
+      // Restore turn_ready for regular player view
+      if (current?.turn_ready != null && !viewAsFactionId) {
+        setTurnReady(current.turn_ready);
+      }
     }
     if (fr.ok) {
       const factions = await fr.json();
       if (viewAsFactionId) {
-        setFaction(factions.find(f => f.id === viewAsFactionId));
+        const viewedFaction = factions.find(f => f.id === viewAsFactionId);
+        setFaction(viewedFaction);
+        // Load turn_ready for the viewed player's participant row
+        if (viewedFaction?.profile_id) {
+          const pr = await fetch(`${SERVER}/api/games/${gameId}/participants`, { headers });
+          if (pr.ok) {
+            const parts = await pr.json();
+            const viewedPart = parts.find(p => p.profile_id === viewedFaction.profile_id);
+            if (viewedPart != null) setTurnReady(viewedPart.turn_ready ?? false);
+          }
+        }
       } else {
         setFaction(factions.find(f => f.profiles?.id === profile?.id || f.profile_id === profile?.id));
       }
@@ -95,7 +110,10 @@ export default function GameView() {
 
   async function finishTurn() {
     const headers = await authHeaders();
-    const r = await fetch(`${SERVER}/api/games/${gameId}/finish-turn`, { method: 'POST', headers });
+    const body = viewAsFactionId && faction?.profile_id
+      ? JSON.stringify({ view_as_profile_id: faction.profile_id })
+      : undefined;
+    const r = await fetch(`${SERVER}/api/games/${gameId}/finish-turn`, { method: 'POST', headers, body });
     if (r.ok) {
       const d = await r.json();
       setTurnReady(true);
@@ -178,8 +196,11 @@ export default function GameView() {
             color: turnReady ? '#475569' : '#fff', fontWeight: 700, cursor: turnReady ? 'default' : 'pointer',
           }}
         >
-          {turnReady ? 'Orders Submitted' : 'Finish Turn'}
+          {turnReady ? 'Orders Submitted ✓' : 'Finish Turn'}
         </button>
+        {viewAsFactionId && faction && (
+          <span style={{ color: '#d97706', fontSize: 12 }}>submitting as {faction.name}</span>
+        )}
         {turnMsg && <span style={{ color: '#94a3b8', fontSize: 13 }}>{turnMsg}</span>}
       </div>
 

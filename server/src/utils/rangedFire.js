@@ -245,6 +245,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   // -------------------------------------------------------------------------
   const casualties = new Map();         // unit_id → cumulative casualty count
   const infraDamageAcc = new Map();     // building_id → cumulative HP damage
+  const vegDamageAcc = new Map();       // hexKey → { tq, tr, clearHeavy?, clearLight? }
   const combatLogInserts = [];
 
   // =========================================================================
@@ -340,27 +341,42 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     }
 
     // --- Dice vs infra ---
-    // Each artillery unit also fires 1 die vs infrastructure.
-    // On a hit: pick a random eligible building in target hex and deal 1 HP.
-    // Eligible infra: buildings (any type), bridge, urban tile (tracked as
-    // buildings with type 'factory'/'airbase'/'harbor'/'airstrip'/'bridge'/'fortification').
-    // Roads and canals are immune (they have no building row).
+    // Eligible infra pool: buildings + vegetation pseudo-entries.
+    // Roads and canals immune (no building row). Vegetation: 1d6 4+ to degrade.
     let hitsVsInfra = 0;
     const buildingsInHex = buildingsByHex.get(targetHexKey) ?? [];
+    const infraPool = [...buildingsInHex.map(b => ({ kind: 'building', b }))];
+    if (targetHex.has_heavy_vegetation) infraPool.push({ kind: 'veg', level: 'heavy' });
+    else if (targetHex.has_light_vegetation) infraPool.push({ kind: 'veg', level: 'light' });
 
     for (let d = 0; d < diceCount; d++) {
       const infraRoll = roll2d6();
-      const infraHit = infraRoll <= toHit;
-      if (!infraHit) continue;
+      if (infraRoll > toHit) continue;
+      if (infraPool.length === 0) continue;  // nothing to hit
 
       hitsVsInfra++;
+      const picked = infraPool[Math.floor(Math.random() * infraPool.length)];
 
-      // Pick a random building in the hex (roads/canals have no building row
-      // so they're already excluded).
-      if (buildingsInHex.length === 0) continue;
-
-      const picked = buildingsInHex[Math.floor(Math.random() * buildingsInHex.length)];
-      infraDamageAcc.set(picked.id, (infraDamageAcc.get(picked.id) ?? 0) + 1);
+      if (picked.kind === 'building') {
+        infraDamageAcc.set(picked.b.id, (infraDamageAcc.get(picked.b.id) ?? 0) + 1);
+      } else {
+        // Vegetation: roll 1d6 — 4+ degrades it
+        const vegRoll = Math.ceil(Math.random() * 6);
+        if (vegRoll >= 4) {
+          const hexKey = targetHexKey;
+          if (!vegDamageAcc.has(hexKey)) vegDamageAcc.set(hexKey, { tq, tr });
+          const entry = vegDamageAcc.get(hexKey);
+          if (picked.level === 'heavy') entry.clearHeavy = true;
+          else entry.clearLight = true;
+          // Update pool so further hits in same salvo see degraded state
+          const idx = infraPool.indexOf(picked);
+          if (picked.level === 'heavy') {
+            infraPool.splice(idx, 1, { kind: 'veg', level: 'light' });
+          } else {
+            infraPool.splice(idx, 1);
+          }
+        }
+      }
     }
 
     // Build casualties summary for log.
@@ -473,6 +489,29 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
         .update({ current_hp: newHp })
         .eq('id', buildingId);
       if (error) errors.push(`Failed to update building ${buildingId} hp: ${error.message}`);
+    }
+  }
+
+  // =========================================================================
+  // 9b. Apply vegetation degradation.
+  // =========================================================================
+  for (const [, { tq, tr, clearHeavy, clearLight }] of vegDamageAcc) {
+    const hexRow = hexDataByKey.get(`${tq},${tr}`);
+    if (!hexRow) continue;
+    const update = {};
+    if (clearHeavy) {
+      update.has_heavy_vegetation = false;
+      update.has_light_vegetation = true; // heavy degrades to light
+    } else if (clearLight) {
+      update.has_light_vegetation = false;
+    }
+    if (Object.keys(update).length > 0) {
+      const { error } = await db.from('hexes')
+        .update(update)
+        .eq('game_id', gameId)
+        .eq('hex_q', tq)
+        .eq('hex_r', tr);
+      if (error) errors.push(`Failed to update vegetation at (${tq},${tr}): ${error.message}`);
     }
   }
 

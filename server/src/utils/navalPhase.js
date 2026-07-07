@@ -110,6 +110,7 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
     return cfg?.tags?.includes('naval');
   }).map(u => ({ ...u, cfg: cfgById.get(u.unit_type_id) }));
 
+
   if (!navalUnits.length) {
     // No naval units — still process bomber strikes if any
     const bomberStrikes = await resolveBomberStrikes(db, gameId, turn, survivingBombers, cfgById, combatLogInserts, errors, allUnitsRaw ?? []);
@@ -144,7 +145,9 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
       if (o.to_hex_q != null && o.to_hex_r != null) {
         const prev = path[path.length - 1];
         const next = { q: o.to_hex_q, r: o.to_hex_r };
-        if (hexDist(prev.q, prev.r, next.q, next.r) !== 1) {
+        const d = hexDist(prev.q, prev.r, next.q, next.r);
+        if (d === 0) continue; // sequence 0 stores the start hex — skip duplicate
+        if (d !== 1) {
           errors.push(`Naval unit ${uid}: non-adjacent waypoint (${next.q},${next.r}) — path truncated`);
           pathValid = false;
           break;

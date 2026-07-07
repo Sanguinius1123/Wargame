@@ -98,11 +98,14 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     const k = `${h.hex_q},${h.hex_r}`;
     if (visible.has(k)) {
       const allUnits = unitsByHex[k] ?? [];
-      // For enemy units, strip to type + stack size only (fog of war on unit stats)
-      const sanitizedUnits = allUnits.map(u => {
-        if (u.factionId === playerFactionId) return u;
-        return { id: u.id, type: u.type, tags: u.tags, quantity: u.quantity, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor };
-      });
+      // Enemy stealth units (submarines) are hidden — they don't appear on the map
+      // unless detected. Own units are always shown.
+      const sanitizedUnits = allUnits
+        .filter(u => u.factionId === playerFactionId || !(u.tags ?? []).includes('stealth'))
+        .map(u => {
+          if (u.factionId === playerFactionId) return u;
+          return { id: u.id, type: u.type, tags: u.tags, quantity: u.quantity, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor };
+        });
       return { ...h, units: sanitizedUnits, buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
     }
     if (scouted.has(k)) {
@@ -142,16 +145,18 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
     .from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).maybeSingle();
   const playerFactionId = playerFaction?.id;
 
-  const sanitized = (units ?? []).map(u => {
-    if (!playerFactionId || u.faction_id === playerFactionId) return u;
-    return {
+  const sanitized = (units ?? []).flatMap(u => {
+    if (!playerFactionId || u.faction_id === playerFactionId) return [u];
+    // Enemy stealth units (submarines) are hidden — same rule as the bulk /hexes endpoint.
+    if ((u.unit_type_config?.tags ?? []).includes('stealth')) return [];
+    return [{
       id: u.id,
       quantity: u.quantity,
       hp: u.hp,
       faction_id: u.faction_id,
       factions: u.factions,
       unit_type_config: { name: u.unit_type_config?.name, tags: u.unit_type_config?.tags },
-    };
+    }];
   });
 
   res.json({ ...hex, units: sanitized });
@@ -524,6 +529,25 @@ router.delete('/:gameId/flight-groups/:groupId', requireAuth, async (req, res) =
 
   await adminDb.from('flight_groups').delete().eq('id', groupId);
   res.json({ ok: true });
+});
+
+// GET /api/map/:gameId/ordered-units — IDs of units that have any order this turn
+// Used by the client to know which units still need orders.
+// GMs and players both allowed; players only see their own faction's data implicitly
+// (they only care about their own units having orders).
+router.get('/:gameId/ordered-units', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+  const [{ data: orders }, { data: fgUnits }] = await Promise.all([
+    adminDb.from('movement_orders').select('unit_id').eq('game_id', gameId).eq('turn', game.current_turn),
+    adminDb.from('flight_group_units').select('unit_id').eq('game_id', gameId),
+  ]);
+  const unitIds = [...new Set([
+    ...(orders ?? []).map(o => o.unit_id),
+    ...(fgUnits ?? []).map(u => u.unit_id),
+  ])];
+  res.json({ unit_ids: unitIds });
 });
 
 // GET /api/map/:gameId/orders/:unitId — get current-turn orders for a unit

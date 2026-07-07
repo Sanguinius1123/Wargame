@@ -6,6 +6,16 @@
 
 - [ ] **Player bridge build not applying road/bridge attributes** — `processBuildOrders` in `server/src/utils/phase4.js` creates the bridge building but does not set `has_road=true` on all 3 hexes or `has_bridge=true` on the water hex. Fix: after upserting the bridge building, PATCH truck hex + water hex + far land hex with `has_road=true`, and water hex with `has_bridge=true`. (`to_hex_q/r` = far land hex, `target_hex_q/r` = water hex, `unit.hex_q/r` = truck hex)
 
+- [ ] **Roads not applied in movement cost** — `movement.js:enterCost()` ignores `has_road` on hexes. Per DESIGN.md, road cost = terrain_cost × 2 (in ×3 scale). Bridges should also check `has_bridge=true` before ground units can cross water hexes via road. Currently road/bridge attributes exist on hexes but have no mechanical effect.
+
+- [ ] **`calculateManpower` stub — not BFS of urban tiles** — `phase4.js:calculateManpower()` uses `settlement_size` directly (simple sum). Per DESIGN.md, manpower = sum of contiguous `has_urban` tiles connected to each controlled `has_settlement` hex, minus any urban tiles at 1–2 HP. Needs a flood-fill BFS from each owned settlement to count connected urban tiles.
+
+- [ ] **`selectedUnit` goes stale after hex refresh** — In `HexMap.jsx`, `selected` hex is re-synced from the hexes array on refresh (line 180–183), but `selectedUnit` is not updated. After a turn advances or GM modifies a unit, the order panel shows stale quantity/HP for the selected unit. Fix: when syncing `selected` on hex refresh, also find and update `selectedUnit` by ID from the updated hex's units list.
+
+- [ ] **Naval path-crossing detection misses B-C crossing when A-B fires first** — In `navalPhase.js` step loop, once a unit is added to `processed` after crossing with unit A, it won't be checked for a second crossing with unit C in the same step. Very rare edge case (3 ships crossing in the same step). Lower priority.
+
+- [ ] **`production_queue` insert doesn't set `status` field** — `map.js` production route inserts rows without `status: 'pending'`. If the DB column lacks a DEFAULT 'pending', items silently drop out of all `eq('status','pending')` queries and never advance. Verify Supabase schema has `DEFAULT 'pending'` on the column; if not, add it to migrations.
+
 ---
 
 ## Next Up (roughly priority order)
@@ -18,9 +28,9 @@
   - Settlements: larger/more prominent icon (gold star or city silhouette) + settlement name label on hex. Unmistakable at a glance.
   - Changes isolated to player-facing `HexGrid.jsx` — GM view keeps labels/coords
 
-- [ ] **Bombard order UI** — target hex selection for Artillery and Battleship units
+- [x] **Bombard order UI** — target hex selection for Artillery and Battleship units
 
-- [ ] **Retreat / Pursue order UI** — buttons visible only when unit is locked in combat (enemy in same hex)
+- [x] **Retreat / Pursue order UI** — buttons visible only when unit is locked in combat (enemy in same hex)
 
 - [ ] **Combat log viewer** — GM panel showing what happened each turn (bombardments, casualties, bridge collapses, etc.)
 

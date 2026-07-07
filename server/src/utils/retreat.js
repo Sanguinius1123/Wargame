@@ -45,11 +45,12 @@ function roll2d6() {
 }
 
 // Defense bonus for a retreating unit in its original hex.
-// Uses the same stacking rules as combat.js (no elevation bonus — same-hex fire).
+// Matches combat.js — includes terrain config bonus (hills, mountains, etc.).
 function defenseBonus(unit, hex, hasFortificationBuilding = false) {
   let bonus = 0;
   if (unit.fortification_level === 1) bonus += 1;
   if (hasFortificationBuilding) bonus += 1;
+  bonus += hex.terrain_type_config?.defense_bonus ?? 0;
   if (hex.has_heavy_vegetation) {
     bonus += 2;
   } else if (hex.has_light_vegetation) {
@@ -240,6 +241,16 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
   const retreatOrders = orders.filter((o) => o.order_type === 'retreat');
   const pursueOrders  = orders.filter((o) => o.order_type === 'pursue_if_retreat');
 
+  // Snapshot which hexes are contested BEFORE any retreats are processed.
+  // If we check isContested() live during the loop, the first retreating unit
+  // removes itself from hexUnits, making the hex appear uncontested for the
+  // opposing faction's retreat order that follows in the same loop iteration.
+  const initiallyContested = new Set();
+  for (const [k, units] of hexUnits) {
+    const factions = new Set(units.map((u) => u.faction_id));
+    if (factions.size >= 2) initiallyContested.add(k);
+  }
+
   // -------------------------------------------------------------------------
   // 5. Process retreats (simultaneous — all fire is queued before applying).
   //
@@ -267,8 +278,10 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
 
     const originKey = hexKey(unit.hex_q, unit.hex_r);
 
-    // 5a. Verify the hex is contested.
-    if (!isContested(originKey)) {
+    // 5a. Verify the hex was contested at the start of this phase.
+    // Use the pre-computed snapshot so that one faction retreating first
+    // doesn't prevent the opposing faction's retreat from processing.
+    if (!initiallyContested.has(originKey)) {
       // Not locked — order ignored silently (unit can retreat freely in regular move).
       continue;
     }
