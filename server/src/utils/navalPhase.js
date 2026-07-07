@@ -291,7 +291,7 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
         stopped.add(u.id);
       }
 
-      // Close combat between all factions (two-faction only for now)
+      // Close combat between all factions — pairwise simultaneous fire
       const factions = [...byFaction.entries()];
       for (let i = 0; i < factions.length; i++) {
         for (let j = i + 1; j < factions.length; j++) {

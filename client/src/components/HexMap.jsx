@@ -12,30 +12,6 @@ function offsetNeighbors(q, r) {
     : [{q:q-1,r},{q:q-1,r:r+1},{q,r:r-1},{q,r:r+1},{q:q+1,r},{q:q+1,r:r+1}];
 }
 
-// Returns true if a supply truck at `hex` has at least one legal bridge placement:
-//   an adjacent water hex that itself has an adjacent land hex that is NOT
-//   adjacent to the truck's hex (i.e. the bridge would actually span water).
-function checkCanBuildBridge(unit, hex, hexes) {
-  if (!unit?.tags?.includes('supply')) return false;
-  if (hex.terrain === 'water') return false;
-  const hexByKey = new Map(hexes.map(h => [`${h.hex_q},${h.hex_r}`, h]));
-  const truckNeighborKeys = new Set(
-    offsetNeighbors(hex.hex_q, hex.hex_r).map(n => `${n.q},${n.r}`)
-  );
-  for (const { q: wq, r: wr } of offsetNeighbors(hex.hex_q, hex.hex_r)) {
-    const wh = hexByKey.get(`${wq},${wr}`);
-    if (!wh || wh.terrain !== 'water') continue;
-    for (const { q: fq, r: fr } of offsetNeighbors(wq, wr)) {
-      if (fq === hex.hex_q && fr === hex.hex_r) continue;
-      if (truckNeighborKeys.has(`${fq},${fr}`)) continue; // must not be adj to truck
-      const fh = hexByKey.get(`${fq},${fr}`);
-      if (!fh || fh.terrain === 'water') continue;
-      return true;
-    }
-  }
-  return false;
-}
-
 async function authHeader() {
   const { data: { session } } = await supabase.auth.getSession();
   return { Authorization: `Bearer ${session?.access_token}` };
@@ -103,10 +79,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [buildMode, setBuildMode] = useState(false);
   const [buildTarget, setBuildTarget] = useState(null);
   const [buildStructureType, setBuildStructureType] = useState('');
-
-  // Bridge-build state (Supply truck, 2-step: water hex → far land hex)
-  const [bridgeBuildMode, setBridgeBuildMode] = useState(false);
-  const [bridgeBuildPicks, setBridgeBuildPicks] = useState([]); // [{q,r}] len 0..2
 
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
@@ -235,8 +207,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     setBuildMode(false);
     setBuildTarget(null);
     setBuildStructureType('');
-    setBridgeBuildMode(false);
-    setBridgeBuildPicks([]);
     setCurrentOrders([]);
     fetchOrders(unit.id, hex);
     setCenterOn({ q: hex.hex_q, r: hex.hex_r });
@@ -267,8 +237,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setBuildMode(false);
       setBuildTarget(null);
       setBuildStructureType('');
-      setBridgeBuildMode(false);
-      setBridgeBuildPicks([]);
       setFlightGroupMode(false);
       setFlightGroupPath([]);
       setFlightGroupTargetQ(null);
@@ -278,7 +246,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     }
   }, [isGM, viewAsFactionId, fetchOrders, onHexSelect]);
 
-  // Called when a hex is clicked during move, bombard, build, or bridgeBuild mode
+  // Called when a hex is clicked during move, bombard, build, or flight group mode
   const handleModeClick = useCallback((hex) => {
     if (flightGroupMode) {
       const needsTarget = ['bombing_run', 'attack_run'].includes(flightGroupMission);
@@ -303,31 +271,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
       setBombardTarget({ q: hex.hex_q, r: hex.hex_r });
     } else if (buildMode) {
       setBuildTarget({ q: hex.hex_q, r: hex.hex_r });
-    } else if (bridgeBuildMode && selected) {
-      const truckQ = selected.hex_q, truckR = selected.hex_r;
-      const hexByKey = new Map(hexes.map(h => [`${h.hex_q},${h.hex_r}`, h]));
-      const clicked = hexByKey.get(`${hex.hex_q},${hex.hex_r}`);
-      if (!clicked) return;
-
-      if (bridgeBuildPicks.length === 0) {
-        // Step 1: must be a water hex adjacent to the truck
-        if (clicked.terrain !== 'water') return;
-        const adjKeys = new Set(offsetNeighbors(truckQ, truckR).map(n => `${n.q},${n.r}`));
-        if (!adjKeys.has(`${hex.hex_q},${hex.hex_r}`)) return;
-        setBridgeBuildPicks([{ q: hex.hex_q, r: hex.hex_r }]);
-      } else if (bridgeBuildPicks.length === 1) {
-        // Step 2: must be a non-water hex adjacent to the water pick but NOT adjacent to truck
-        if (clicked.terrain === 'water') return;
-        const waterPick = bridgeBuildPicks[0];
-        const waterAdjKeys = new Set(offsetNeighbors(waterPick.q, waterPick.r).map(n => `${n.q},${n.r}`));
-        if (!waterAdjKeys.has(`${hex.hex_q},${hex.hex_r}`)) return;
-        const truckAdjKeys = new Set(offsetNeighbors(truckQ, truckR).map(n => `${n.q},${n.r}`));
-        if (truckAdjKeys.has(`${hex.hex_q},${hex.hex_r}`)) return; // adjacent to truck — invalid
-        if (hex.hex_q === truckQ && hex.hex_r === truckR) return;
-        setBridgeBuildPicks([waterPick, { q: hex.hex_q, r: hex.hex_r }]);
-      }
     }
-  }, [flightGroupMode, flightGroupMission, flightGroupTargetQ, moveMode, bombardMode, buildMode, bridgeBuildMode, bridgeBuildPicks, retreatMode, selected, hexes, viewAsFactionId, playerFactionId]);
+  }, [flightGroupMode, flightGroupMission, flightGroupTargetQ, moveMode, bombardMode, buildMode, retreatMode, selected, hexes, viewAsFactionId, playerFactionId]);
 
   const enterMoveMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -560,42 +505,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
   }, [selectedUnit, buildStructureType, buildTarget, gameId, viewAsFactionId, fetchOrders]);
 
-  const enterBridgeBuildMode = useCallback(() => {
-    if (!selectedUnit) return;
-    setBridgeBuildMode(true);
-    setBridgeBuildPicks([]);
-    setCurrentOrders([]);
-  }, [selectedUnit]);
-
-  const cancelBridgeBuild = useCallback(() => {
-    setBridgeBuildMode(false);
-    setBridgeBuildPicks([]);
-    fetchOrders(selectedUnit?.id ?? null);
-  }, [selectedUnit, fetchOrders]);
-
-  const confirmBridgeBuild = useCallback(async () => {
-    if (!selectedUnit || bridgeBuildPicks.length !== 2) return;
-    const [waterPick, farPick] = bridgeBuildPicks;
-    const headers = await authHeader();
-    await fetch(`${SERVER}/api/map/${gameId}/orders`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        unit_id: selectedUnit.id,
-        order_type: 'build',
-        structure_type: 'bridge',
-        target_hex_q: waterPick.q,
-        target_hex_r: waterPick.r,
-        to_hex_q: farPick.q,
-        to_hex_r: farPick.r,
-        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
-      }),
-    });
-    setBridgeBuildMode(false);
-    setBridgeBuildPicks([]);
-    await fetchOrders(selectedUnit.id);
-  }, [selectedUnit, bridgeBuildPicks, gameId, viewAsFactionId, fetchOrders]);
-
   const enterFlightGroupMode = useCallback((missionType) => {
     if (!selectedUnit) return;
     setFlightGroupMission(missionType);
@@ -716,7 +625,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
                 movePath={movePath}
                 bombardMode={bombardMode}
                 bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
-                buildMode={buildMode || bridgeBuildMode || flightGroupMode || retreatMode}
+                buildMode={buildMode || flightGroupMode || retreatMode}
                 buildTargetKey={
                   buildTarget ? `${buildTarget.q},${buildTarget.r}` :
                   (flightGroupTargetQ !== null ? `${flightGroupTargetQ},${flightGroupTargetR}` : null)
@@ -746,8 +655,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               buildMode={buildMode}
               buildTarget={buildTarget}
               buildStructureType={buildStructureType}
-              bridgeBuildMode={bridgeBuildMode}
-              bridgeBuildPicks={bridgeBuildPicks}
               onEnterMoveMode={enterMoveMode}
               onConfirmMove={confirmMove}
               onCancelMove={cancelMove}
@@ -757,9 +664,6 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onEnterBuildMode={enterBuildMode}
               onConfirmBuild={confirmBuild}
               onCancelBuild={cancelBuild}
-              onEnterBridgeBuildMode={enterBridgeBuildMode}
-              onConfirmBridgeBuild={confirmBridgeBuild}
-              onCancelBridgeBuild={cancelBridgeBuild}
               onClearOrders={clearOrders}
               onFortify={fortifyUnit}
               onEnterRetreat={enterRetreatMode}
@@ -832,8 +736,6 @@ function HexDetail({
   buildMode,
   buildTarget,
   buildStructureType,
-  bridgeBuildMode,
-  bridgeBuildPicks,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
@@ -843,9 +745,6 @@ function HexDetail({
   onEnterBuildMode,
   onConfirmBuild,
   onCancelBuild,
-  onEnterBridgeBuildMode,
-  onConfirmBridgeBuild,
-  onCancelBridgeBuild,
   onClearOrders,
   onFortify,
   onEnterRetreat,
@@ -903,8 +802,6 @@ function HexDetail({
   const hasAirbase = hex.buildings?.some(b => b.type === 'airbase' && b.current_hp >= 1);
   const unitTags = selectedUnit?.tags ?? [];
   const hasRepairFacility = (unitTags.includes('naval') && hasHarbor) || (unitTags.includes('air') && hasAirbase);
-
-  const canBuildBridge = checkCanBuildBridge(selectedUnit, hex, hexes);
 
   return (
     <div>
@@ -1025,9 +922,6 @@ function HexDetail({
               buildMode={buildMode}
               buildTarget={buildTarget}
               buildStructureType={buildStructureType}
-              bridgeBuildMode={bridgeBuildMode}
-              bridgeBuildPicks={bridgeBuildPicks}
-              canBuildBridge={canBuildBridge}
               onEnterMoveMode={onEnterMoveMode}
               onConfirmMove={onConfirmMove}
               onCancelMove={onCancelMove}
@@ -1037,9 +931,6 @@ function HexDetail({
               onEnterBuildMode={onEnterBuildMode}
               onConfirmBuild={onConfirmBuild}
               onCancelBuild={onCancelBuild}
-              onEnterBridgeBuildMode={onEnterBridgeBuildMode}
-              onConfirmBridgeBuild={onConfirmBridgeBuild}
-              onCancelBridgeBuild={onCancelBridgeBuild}
               onClearOrders={onClearOrders}
               onFortify={onFortify}
               onEnterRetreat={onEnterRetreat}
@@ -1233,9 +1124,6 @@ function OrderPanel({
   buildMode,
   buildTarget,
   buildStructureType,
-  bridgeBuildMode,
-  bridgeBuildPicks,
-  canBuildBridge,
   onEnterMoveMode,
   onConfirmMove,
   onCancelMove,
@@ -1245,9 +1133,6 @@ function OrderPanel({
   onEnterBuildMode,
   onConfirmBuild,
   onCancelBuild,
-  onEnterBridgeBuildMode,
-  onConfirmBridgeBuild,
-  onCancelBridgeBuild,
   onClearOrders,
   onFortify,
   onEnterRetreat,
@@ -1287,7 +1172,7 @@ function OrderPanel({
     orderSummary.push(ORDER_TYPE_LABELS[t] ?? t);
   }
 
-  const inAnyMode = moveMode || bombardMode || buildMode || bridgeBuildMode || splitMode || retreatMode;
+  const inAnyMode = moveMode || bombardMode || buildMode || splitMode || retreatMode;
 
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
@@ -1429,27 +1314,6 @@ function OrderPanel({
         </div>
       )}
 
-      {/* Bridge build mode */}
-      {bridgeBuildMode && (
-        <div>
-          <p style={{ color: '#34d399', fontSize: 11, marginBottom: 6 }}>
-            {bridgeBuildPicks.length === 0 && 'Step 1/2 — click the water hex to cross.'}
-            {bridgeBuildPicks.length === 1 && `Step 2/2 — click the far land hex. Water: (${bridgeBuildPicks[0].q},${bridgeBuildPicks[0].r})`}
-            {bridgeBuildPicks.length === 2 && `Ready: (${bridgeBuildPicks[0].q},${bridgeBuildPicks[0].r}) → (${bridgeBuildPicks[1].q},${bridgeBuildPicks[1].r})`}
-          </p>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              style={{ ...BTN.base, background: '#065f46', color: '#6ee7b7', opacity: bridgeBuildPicks.length === 2 ? 1 : 0.4 }}
-              disabled={bridgeBuildPicks.length !== 2}
-              onClick={onConfirmBridgeBuild}
-            >
-              Confirm Bridge
-            </button>
-            <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelBridgeBuild}>Cancel</button>
-          </div>
-        </div>
-      )}
-
       {/* Normal buttons (not in any mode) */}
       {!inAnyMode && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1546,15 +1410,6 @@ function OrderPanel({
                       Build…
                     </button>
                   </div>
-                  {canBuildBridge && (
-                    <button
-                      style={{ ...BTN.base, background: '#5c1f00', color: '#fed7aa', marginTop: 6, width: '100%' }}
-                      onClick={onEnterBridgeBuildMode}
-                      title="Build Bridge: Select a water hex then the far land hex. Truck must be adjacent to the water hex. Truck is consumed; bridge completes Phase 4."
-                    >
-                      Build Bridge…
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -1584,8 +1439,8 @@ function OrderPanel({
   );
 }
 
-const BUILDING_TYPES = ['factory', 'airbase', 'harbor', 'airstrip', 'bridge', 'fortification', 'control_point'];
-const BUILDING_MAX_HP_CLIENT = { factory: 20, airbase: 10, harbor: 10, airstrip: 4, bridge: 4, fortification: 4, control_point: 4 };
+const BUILDING_TYPES = ['factory', 'airbase', 'harbor', 'airstrip', 'fortification', 'control_point'];
+const BUILDING_MAX_HP_CLIENT = { factory: 20, airbase: 10, harbor: 10, airstrip: 4, fortification: 4, control_point: 4 };
 
 function GMBuildingEditor({ hex, gameId, onRefresh }) {
   const [factions, setFactions] = useState([]);

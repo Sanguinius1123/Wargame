@@ -130,7 +130,7 @@ router.patch('/:gameId/settings', requireGM, async (req, res) => {
 
 const BUILDING_MAX_HP = {
   factory: 20, airbase: 10, harbor: 10,
-  airstrip: 4, bridge: 4, fortification: 4,
+  airstrip: 4, fortification: 4,
 };
 
 // POST /api/gm/:gameId/buildings — place a building (full HP by default = operational)

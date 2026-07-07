@@ -88,7 +88,7 @@ export async function captureObjectives(db, gameId) {
     // Transfer buildings in this hex
     const hexBuildings = (buildings ?? []).filter(b => b.hex_q === q && b.hex_r === r);
     for (const bldg of hexBuildings) {
-      if (bldg.type === 'bridge' || bldg.type === 'fortification') continue; // infrastructure, not ownable
+      if (bldg.type === 'fortification') continue; // not ownable — personal to defender
       await db.from('buildings').update({ owner_faction_id: capturingFaction })
         .eq('game_id', gameId).eq('hex_q', q).eq('hex_r', r).eq('type', bldg.type);
 

@@ -353,9 +353,9 @@ export async function processRepairOrders(db, gameId, currentTurn) {
 // ---------------------------------------------------------------------------
 // 6. processBuildOrders
 // Supply trucks build structures. One-turn build → structure at full HP,
-// truck consumed (except roads and canals).
+// truck consumed.
 // ---------------------------------------------------------------------------
-const STRUCTURE_MAX_HP = { fortification: 4, bridge: 4, airstrip: 4 };
+const STRUCTURE_MAX_HP = { fortification: 4, airstrip: 4 };
 
 export async function processBuildOrders(db, gameId, currentTurn) {
   const { data: buildOrders } = await db
