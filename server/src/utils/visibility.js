@@ -16,7 +16,7 @@ function key(q, r) { return `${q},${r}`; }
 export async function computeVisibility(db, factionId, gameId) {
   const [unitRows, hexRows, scoutedRows] = await Promise.all([
     fetchAll(() => db.from('units')
-      .select('hex_q, hex_r, unit_type_config(tags)')
+      .select('hex_q, hex_r, unit_type_config(tags, los, sonar_range)')
       .eq('game_id', gameId)
       .eq('faction_id', factionId)),
     fetchAll(() => db.from('hexes')
@@ -38,17 +38,26 @@ export async function computeVisibility(db, factionId, gameId) {
     const tags = unit.unit_type_config?.tags ?? [];
     const isNaval = tags.includes('naval');
     const ownTerrain = hexTerrain.get(key(q, r));
+    const los = unit.unit_type_config?.los ?? 1;
+    const sonarRange = unit.unit_type_config?.sonar_range ?? 0;
 
-    // All units: own hex + all adjacent hexes.
-    for (const k of hexesInRange(q, r, 1)) visible.add(k);
+    // Elevation bonus: +1 LOS on hills or mountains.
+    const elevBonus = (ownTerrain === 'hills' || ownTerrain === 'mountains') ? 1 : 0;
+    const effectiveLos = los + elevBonus;
 
-    // Extended water vision: naval units always; land units on shoreline.
+    // All units: see hexes within LOS range.
+    for (const k of hexesInRange(q, r, effectiveLos)) visible.add(k);
+
+    // Extended water vision: naval units see water at max(los, 2, sonar_range).
+    // Sonar extends submarine water-hex detection to sonar_range (default 4).
+    // Shoreline ground units also see adjacent water at distance 2.
+    const waterRange = Math.max(los, isNaval ? 2 : 0, sonarRange);
     const isShoreline = !isNaval
       && ownTerrain !== 'water'
       && offsetNeighbors(q, r).some(nb => hexTerrain.get(key(nb.q, nb.r)) === 'water');
 
     if (isNaval || isShoreline) {
-      for (const k of hexesInRange(q, r, 2)) {
+      for (const k of hexesInRange(q, r, waterRange)) {
         if (hexTerrain.get(k) === 'water') visible.add(k);
       }
     }

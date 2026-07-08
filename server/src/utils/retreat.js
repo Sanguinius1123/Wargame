@@ -665,9 +665,27 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
       continue;
     }
 
-    // 8c. Successful pursuit — pursuer is already in the vacated hex (currentKey).
-    //    No position update needed. The "pursuit" is that the pursuer holds the
-    //    hex the retreater fled from. Log it.
+    // 8c. Successful pursuit — pursuer moves to the retreater's destination hex.
+    if (retreaterDestKey) {
+      const [dq, dr] = retreaterDestKey.split(',').map(Number);
+
+      // Update in-memory position.
+      hexUnits.set(currentKey, (hexUnits.get(currentKey) ?? []).filter(u => u.id !== pursuer.id));
+      pursuer.hex_q = dq;
+      pursuer.hex_r = dr;
+      if (!hexUnits.has(retreaterDestKey)) hexUnits.set(retreaterDestKey, []);
+      hexUnits.get(retreaterDestKey).push(pursuer);
+
+      const { error: pursuitMoveError } = await db
+        .from('units')
+        .update({ hex_q: dq, hex_r: dr })
+        .eq('id', pursuer.id);
+
+      if (pursuitMoveError) {
+        errors.push(`Pursuit: failed to move unit ${pursuer.id} to (${dq},${dr}) — ${pursuitMoveError.message}`);
+      }
+    }
+
     combatLogInserts.push({
       game_id: gameId,
       turn,
@@ -680,8 +698,7 @@ export async function executeRetreatsAndPursuit(db, gameId, turn) {
         event: 'pursuit_success',
         unit_id: pursuer.id,
         unit_type: pursuer.unitTypeCfg.name,
-        held_hex: { q: pursuer.hex_q, r: pursuer.hex_r },
-        retreater_fled_to: retreaterDestKey,
+        pursued_to: retreaterDestKey ? { q: pursuer.hex_q, r: pursuer.hex_r } : null,
       },
     });
 

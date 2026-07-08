@@ -1,30 +1,29 @@
 -- =============================================================
--- 005_fog.sql — Movement orders, production queue, combat log,
+-- 005_orders.sql — Orders, production queue, combat log,
 --   flight groups
--- (Fog of war / scouted_hexes has moved to 003_map.sql)
 -- =============================================================
 
--- Movement and action orders. One row per unit per order step.
--- Multi-hex paths use sequence (0 = first step, 1 = second, etc.).
+-- Movement and action orders. One row per unit per step.
+-- Multi-hex paths use sequence (0 = first step).
 CREATE TABLE movement_orders (
-  id           UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
-  unit_id      UUID     NOT NULL REFERENCES units(id) ON DELETE CASCADE,
-  game_id      UUID     NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  order_type   TEXT     NOT NULL DEFAULT 'move'
-               CHECK (order_type IN (
-                 'move', 'bombard', 'retreat', 'pursue_if_retreat',
-                 'wait_turn', 'fortify', 'repair'
-               )),
-  sequence     SMALLINT NOT NULL DEFAULT 0,   -- step index in multi-hex movement path
-  to_hex_q     SMALLINT,                      -- destination hex (move / retreat)
-  to_hex_r     SMALLINT,
-  target_hex_q SMALLINT,                      -- bombardment target hex
-  target_hex_r SMALLINT,
-  turn         SMALLINT NOT NULL
+  id             UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_id        UUID     NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  game_id        UUID     NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  order_type     TEXT     NOT NULL DEFAULT 'move'
+                 CHECK (order_type IN (
+                   'move', 'bombard', 'retreat', 'pursue_if_retreat',
+                   'wait_turn', 'fortify', 'repair', 'build', 'split'
+                 )),
+  sequence       SMALLINT NOT NULL DEFAULT 0,
+  to_hex_q       SMALLINT,
+  to_hex_r       SMALLINT,
+  target_hex_q   SMALLINT,
+  target_hex_r   SMALLINT,
+  structure_type TEXT,              -- build orders: 'road', 'bridge', 'airstrip', etc.
+  turn           SMALLINT NOT NULL
 );
 
--- Unit production queue.
--- pending = being built; ready = available to place next turn.
+-- Production queue.
 -- Entire queue is lost if the factory is captured during Phase 3 (no refund).
 CREATE TABLE production_queue (
   id            UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,8 +38,8 @@ CREATE TABLE production_queue (
   created_turn  SMALLINT NOT NULL
 );
 
--- Combat log. One row per notable event per phase per turn.
--- data JSONB holds event-specific detail (units involved, rolls, casualties, etc.).
+-- Combat log. One row per notable event per phase.
+-- data JSONB holds event-specific detail (units, rolls, casualties, etc.).
 CREATE TABLE combat_log (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   game_id    UUID        NOT NULL REFERENCES games(id)    ON DELETE CASCADE,
@@ -54,9 +53,7 @@ CREATE TABLE combat_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Flight groups for air missions, composed during the ordering phase.
--- path is an array of {q, r} waypoints for the mission route.
--- target_infra designates a specific infrastructure target for bombing runs (nullable).
+-- Flight groups for air missions. path = array of {q, r} waypoints.
 CREATE TABLE flight_groups (
   id           UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
   game_id      UUID     NOT NULL REFERENCES games(id)    ON DELETE CASCADE,
@@ -72,11 +69,20 @@ CREATE TABLE flight_groups (
   turn         SMALLINT NOT NULL
 );
 
+-- Junction: which air units are in each flight group. One unit per group per turn.
+CREATE TABLE flight_group_units (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  flight_group_id UUID NOT NULL REFERENCES flight_groups(id) ON DELETE CASCADE,
+  unit_id         UUID NOT NULL REFERENCES units(id)         ON DELETE CASCADE,
+  UNIQUE (unit_id, flight_group_id)
+);
+
 -- RLS
 ALTER TABLE movement_orders  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE production_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE combat_log       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flight_groups    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE flight_group_units ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "own faction manages movement orders"
   ON movement_orders FOR ALL
@@ -113,8 +119,7 @@ CREATE POLICY "participants read combat log"
   ));
 
 CREATE POLICY "gm writes combat log"
-  ON combat_log FOR ALL
-  USING (is_gm_in_game(game_id));
+  ON combat_log FOR ALL USING (is_gm_in_game(game_id));
 
 CREATE POLICY "own faction manages flight groups"
   ON flight_groups FOR ALL
@@ -129,3 +134,24 @@ CREATE POLICY "participants read flight groups"
     SELECT 1 FROM game_participants gp
     WHERE gp.game_id = flight_groups.game_id AND gp.profile_id = auth.uid()
   ));
+
+CREATE POLICY "own faction manages flight group units"
+  ON flight_group_units FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM flight_groups fg JOIN factions f ON f.id = fg.faction_id
+      WHERE fg.id = flight_group_units.flight_group_id
+        AND (f.profile_id = auth.uid() OR is_gm_in_game(fg.game_id))
+    )
+  );
+
+CREATE POLICY "participants read flight group units"
+  ON flight_group_units FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM flight_groups fg
+      JOIN game_participants gp ON gp.game_id = fg.game_id
+      WHERE fg.id = flight_group_units.flight_group_id
+        AND gp.profile_id = auth.uid()
+    )
+  );

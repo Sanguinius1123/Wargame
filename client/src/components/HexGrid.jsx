@@ -42,16 +42,141 @@ function hexCorners(cx, cy, size) {
   return pts.join(' ');
 }
 
-// Top 3 unit stacks to display on hex
-function getTopUnits(units) {
-  if (!units?.length) return [];
-  const grouped = {};
+const UNIT_ABBR = {
+  'Infantry':        'IN',
+  'Armor':           'AR',
+  'Artillery':       'RT',
+  'AT Gun':          'AT',
+  'AA Gun':          'AA',
+  'Recon':           'RC',
+  'Supply':          'SU',
+  'Fighter':         'FT',
+  'Scout Plane':     'SC',
+  'Bomber':          'BM',
+  'Transport Plane': 'TP',
+  'Destroyer':       'DD',
+  'Frigate':         'FF',
+  'Cruiser':         'CA',
+  'Battleship':      'BB',
+  'Transport':       'TS',
+  'Carrier':         'CV',
+  'Submarine':       'SS',
+};
+
+// Shape badge rendered behind the unit abbreviation text.
+// Each ground type gets a distinct shape; naval/air fall back to circle.
+// grabbed=true adds a bright yellow stroke; fortified=true adds an amber outer ring.
+function renderUnitBadge(type, cx, cy, grabbed = false, fortified = false) {
+  const fill = '#0f172a';
+  const op   = 0.85;
+  const hl   = grabbed ? { stroke: '#facc15', strokeWidth: 2 } : {};
+  const badge = (() => {
+    switch (type) {
+      case 'Armor':
+        return <ellipse cx={cx} cy={cy} rx={12} ry={7} fill={fill} opacity={op} {...hl} />;
+      case 'Artillery': {
+        const pts = `${cx},${cy - 11} ${cx - 10},${cy + 6} ${cx + 10},${cy + 6}`;
+        return <polygon points={pts} fill={fill} opacity={op} {...hl} />;
+      }
+      case 'AT Gun':
+        return <rect x={cx - 8} y={cy - 8} width={16} height={16} fill={fill} opacity={op} rx={1} {...hl} />;
+      case 'AA Gun': {
+        const pts = [0,1,2,3,4,5].map(i => {
+          const a = (Math.PI / 3) * i - Math.PI / 6;
+          return `${(cx + 9 * Math.cos(a)).toFixed(1)},${(cy + 9 * Math.sin(a)).toFixed(1)}`;
+        }).join(' ');
+        return <polygon points={pts} fill={fill} opacity={op} {...hl} />;
+      }
+      case 'Recon':
+        return (
+          <g>
+            <circle cx={cx} cy={cy} r={9} fill={fill} opacity={op} {...hl} />
+            <line x1={cx - 6} y1={cy + 6} x2={cx + 6} y2={cy - 6}
+              stroke="#475569" strokeWidth={2} strokeLinecap="round" style={{ pointerEvents: 'none' }} />
+          </g>
+        );
+      default: // Infantry + all others
+        return <circle cx={cx} cy={cy} r={9} fill={fill} opacity={op} {...hl} />;
+    }
+  })();
+  if (!fortified) return badge;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={12} fill="none" stroke="#f59e0b" strokeWidth={1.5} opacity={0.8} />
+      {badge}
+    </g>
+  );
+}
+
+// Render all units on a hex, grouped by faction into rows.
+// Each faction gets its own horizontal row; badges scale down if a row has many units.
+function renderHexUnits(h, cx, cy, playerFactionId, dragUnitId, onUnitClick, onUnitDragStart, unitDragActiveRef) {
+  const units = h.units;
+  if (!units?.length) return null;
+
+  const factionMap = new Map();
   for (const u of units) {
-    const k = `${u.factionId}-${u.type}`;
-    if (!grouped[k]) grouped[k] = { ...u, quantity: 0 };
-    grouped[k].quantity += u.quantity;
+    if (!factionMap.has(u.factionId)) factionMap.set(u.factionId, []);
+    factionMap.get(u.factionId).push(u);
   }
-  return Object.values(grouped).slice(0, 3);
+
+  const factions = [...factionMap.keys()];
+  const numRows = factions.length;
+  const ROW_PITCH = numRows <= 2 ? 13 : 11;
+  const refY = cy - 2; // shift unit block slightly above center
+  const startRowY = refY - ((numRows - 1) / 2) * ROW_PITCH;
+
+  return factions.map((fid, rowIdx) => {
+    const rowUnits = factionMap.get(fid);
+    const N = rowUnits.length;
+    const rowY = startRowY + rowIdx * ROW_PITCH;
+
+    const MAX_W = 46;
+    const NAT_PITCH = 16;
+    const pitch = N <= 1 ? 0 : Math.min(NAT_PITCH, MAX_W / (N - 1));
+    const scale = N <= 1 ? 1 : Math.max(0.45, pitch / NAT_PITCH);
+    const totalWidth = (N - 1) * pitch;
+
+    return (
+      <g key={fid}>
+        {rowUnits.map((u, i) => {
+          const ux = cx - totalWidth / 2 + i * pitch;
+          const uy = rowY;
+          const isDraggable = playerFactionId && u.factionId === playerFactionId && !u.tags?.includes('air');
+          return (
+            <g key={u.id}
+              style={{ cursor: isDraggable ? 'grab' : 'pointer' }}
+              onClick={(e) => { e.stopPropagation(); onUnitClick?.(u, h); }}
+              onMouseDown={isDraggable ? (e) => {
+                e.stopPropagation(); e.preventDefault();
+                unitDragActiveRef.current = true;
+                onUnitDragStart?.(u, h);
+              } : undefined}
+            >
+              {/* Transparent hit area so the outer <g> receives pointer events even when children are pointerEvents:none */}
+              <circle cx={ux} cy={uy} r={11} fill="transparent" />
+              <g transform={scale < 1 ? `translate(${ux},${uy}) scale(${scale}) translate(${-ux},${-uy})` : undefined}
+                style={{ pointerEvents: 'none' }}>
+                {renderUnitBadge(u.type, ux, uy, u.id === dragUnitId, u.fortification_level === 1)}
+              </g>
+              <text x={ux} y={u.quantity > 1 ? uy + 1 * scale : uy + 3 * scale}
+                textAnchor="middle" fontSize={Math.max(5, Math.round(7 * scale))}
+                fill={u.factionColor ?? '#60a5fa'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                {UNIT_ABBR[u.type] ?? u.type?.slice(0, 2) ?? '?'}
+              </text>
+              {u.quantity > 1 && (
+                <text x={ux} y={uy + 8 * scale} textAnchor="middle"
+                  fontSize={Math.max(4, Math.round(6 * scale))}
+                  fill={u.factionColor ?? '#60a5fa'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                  {u.quantity}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    );
+  });
 }
 
 function arrowPath(x1, y1, x2, y2) {
@@ -68,6 +193,151 @@ function arrowPath(x1, y1, x2, y2) {
   };
 }
 
+// --- Terrain feature renderers ---
+
+function renderMountains(cx, cy) {
+  // Left and right smaller peaks first (behind), tall center peak last (front)
+  const peaks = [
+    { ox: -11, baseY: cy + 7, h: 12, hw: 6 },
+    { ox:  11, baseY: cy + 7, h: 12, hw: 6 },
+    { ox:   0, baseY: cy + 9, h: 18, hw: 9 },
+  ];
+  return peaks.map((p, i) => {
+    const bx = cx + p.ox;
+    const lx = bx - p.hw, rx = bx + p.hw, ty = p.baseY - p.h;
+    const snowY  = p.baseY - p.h * 0.65;
+    const snowHW = p.hw * 0.35;
+    return (
+      <g key={i} style={{ pointerEvents: 'none' }}>
+        <polygon points={`${lx},${p.baseY} ${rx},${p.baseY} ${bx},${ty}`}
+          fill="#606470" stroke="#2d3748" strokeWidth={0.8} />
+        <polygon points={`${bx - snowHW},${snowY} ${bx + snowHW},${snowY} ${bx},${ty}`}
+          fill="#dde6ed" stroke="none" />
+      </g>
+    );
+  });
+}
+
+function renderHills(cx, cy) {
+  const bumps = [
+    { x: cx - 10, y: cy + 7, rx: 10, ry: 6   },
+    { x: cx +  9, y: cy + 7, rx:  9, ry: 5.5  },
+    { x: cx,      y: cy,     rx:  8, ry: 5    },
+  ];
+  return bumps.map((b, i) => (
+    <path key={i}
+      d={`M ${b.x - b.rx},${b.y} A ${b.rx},${b.ry} 0 0 1 ${b.x + b.rx},${b.y} Z`}
+      fill="#cdb85a" stroke="#7a6a20" strokeWidth={0.7}
+      style={{ pointerEvents: 'none' }}
+    />
+  ));
+}
+
+function renderVegetation(cx, cy, heavy) {
+  const trunk = '#4a2e0e';
+  if (heavy) {
+    // Dense forest: three pine trees of varying heights
+    const trees = [
+      { x: cx - 9,  by: cy + 10, h: 11, hw: 5 },
+      { x: cx + 1,  by: cy + 8,  h: 14, hw: 6 },
+      { x: cx + 10, by: cy + 10, h: 10, hw: 4 },
+    ];
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        {trees.map((t, i) => (
+          <g key={i}>
+            <rect x={t.x - 1} y={t.by - t.h * 0.38} width={2} height={t.h * 0.38} fill={trunk} />
+            <polygon
+              points={`${t.x},${t.by - t.h} ${t.x - t.hw},${t.by - t.h * 0.38} ${t.x + t.hw},${t.by - t.h * 0.38}`}
+              fill="#1a5c12" stroke="#0d3508" strokeWidth={0.6}
+            />
+          </g>
+        ))}
+      </g>
+    );
+  }
+  // Light vegetation: one small tree + two grass tufts
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      <rect x={cx - 9} y={cy + 6} width={2} height={4} fill={trunk} />
+      <polygon
+        points={`${cx - 8},${cy - 1} ${cx - 14},${cy + 6} ${cx - 2},${cy + 6}`}
+        fill="#2d7a1c" stroke="#1a5010" strokeWidth={0.5}
+      />
+      {[cx + 4, cx + 9].map((gx, gi) => (
+        <g key={gi}>
+          <line x1={gx - 2} y1={cy + 10} x2={gx - 3} y2={cy + 5} stroke="#3d9225" strokeWidth={1.3} strokeLinecap="round" />
+          <line x1={gx}     y1={cy + 10} x2={gx}     y2={cy + 4} stroke="#4aac2e" strokeWidth={1.3} strokeLinecap="round" />
+          <line x1={gx + 2} y1={cy + 10} x2={gx + 3} y2={cy + 5} stroke="#3d9225" strokeWidth={1.3} strokeLinecap="round" />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+// Small castle icon for fortification buildings. cx, cy = hex center.
+function renderFortification(cx, cy) {
+  const bx = cx + 12, by = cy + 12; // bottom-right corner of hex
+  const w = 11, h = 8, mw = 2, mg = 2; // wall width/height, merlon width/gap
+  const lx = bx - w / 2;
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {/* Wall base */}
+      <rect x={lx} y={by - h} width={w} height={h} fill="#94a3b8" stroke="#1e293b" strokeWidth={0.8} rx={0.5} />
+      {/* Three merlons (crenellations) */}
+      {[0, 1, 2].map(i => (
+        <rect key={i} x={lx + i * (mw + mg)} y={by - h - 4} width={mw} height={4}
+          fill="#94a3b8" stroke="#1e293b" strokeWidth={0.8} />
+      ))}
+      {/* Gate arch */}
+      <rect x={cx + 12 - 2} y={by - 5} width={4} height={5} fill="#0f172a" />
+    </g>
+  );
+}
+
+// Single building shape. x, y = bottom-center of the body.
+function Bldg({ x, y, bw, bh, rh = 0, bodyFill = '#7a8ea8', roofFill = '#8b2500' }) {
+  const lx = x - bw / 2, rx = x + bw / 2, topY = y - bh;
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      <rect x={lx} y={topY} width={bw} height={bh} fill={bodyFill} stroke="#1e2533" strokeWidth={0.6} />
+      {rh > 0 && (
+        <polygon points={`${lx},${topY} ${x},${topY - rh} ${rx},${topY}`}
+          fill={roofFill} stroke="#1e2533" strokeWidth={0.6} />
+      )}
+    </g>
+  );
+}
+
+function renderSettlement(cx, cy, size) {
+  if (size >= 9) {
+    // City: dense skyline of rectangular blocks
+    return [
+      <Bldg key="a" x={cx - 12} y={cy + 9} bw={7} bh={6}  bodyFill="#4a5568" />,
+      <Bldg key="b" x={cx - 4}  y={cy + 9} bw={6} bh={11} bodyFill="#3d4a5c" />,
+      <Bldg key="c" x={cx + 4}  y={cy + 9} bw={7} bh={7}  bodyFill="#4a5568" />,
+      <Bldg key="d" x={cx + 12} y={cy + 9} bw={6} bh={5}  bodyFill="#56677a" />,
+      <Bldg key="e" x={cx}      y={cy + 2} bw={5} bh={14} bodyFill="#2d3748" />,
+    ];
+  }
+  if (size >= 5) {
+    // Town: houses + one taller structure
+    return [
+      <Bldg key="a" x={cx - 11} y={cy + 9} bw={6} bh={5} rh={3} />,
+      <Bldg key="b" x={cx - 3}  y={cy + 9} bw={6} bh={5} rh={3} />,
+      <Bldg key="c" x={cx + 5}  y={cy + 9} bw={6} bh={5} rh={3} />,
+      <Bldg key="d" x={cx - 7}  y={cy + 2} bw={6} bh={5} rh={3} />,
+      <Bldg key="e" x={cx + 3}  y={cy + 2} bw={8} bh={9} bodyFill="#5a6e85" />,
+    ];
+  }
+  // Village: 3 small houses
+  return [
+    <Bldg key="a" x={cx - 9} y={cy + 9} bw={7} bh={5} rh={4} />,
+    <Bldg key="b" x={cx + 1} y={cy + 9} bw={7} bh={5} rh={4} />,
+    <Bldg key="c" x={cx - 4} y={cy + 2} bw={7} bh={5} rh={4} />,
+  ];
+}
+
 export default function HexGrid({
   hexes,
   onSelect,
@@ -78,9 +348,20 @@ export default function HexGrid({
   movePath = [],
   bombardMode = false,
   bombardTargetKey = null,
+  bombardRangeKeys = null,
   buildMode = false,
   onPathClick,
-  centerOn = null,   // { q, r } — when this changes, pan the map to that hex
+  centerOn = null,
+  // Drag-and-drop
+  playerFactionId = null,
+  reachableKeys = null,
+  dragOverKey = null,
+  onUnitDragStart = null,
+  onDragMove = null,
+  onDragEnd = null,
+  showCoords = false,
+  dragUnitId = null,
+  onUnitClick = null,
 }) {
   const safeHexes = hexes ?? [];
   const SIZE = 36;
@@ -126,6 +407,18 @@ export default function HexGrid({
 
   const svgRef = useRef(null);
   const dragRef = useRef(null);
+  const unitDragActiveRef = useRef(false);
+  const pixelsRef = useRef([]);
+  pixelsRef.current = pixels;
+
+  // Attach a non-passive wheel listener so preventDefault actually suppresses page scroll
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || !panZoom) return;
+    const handler = (e) => e.preventDefault();
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [panZoom]);
 
   const onWheel = useCallback((e) => {
     if (!panZoom) return;
@@ -139,12 +432,45 @@ export default function HexGrid({
     setVb({ x: mx - (mx - vb.x) * (newW / vb.width), y: my - (my - vb.y) * (newH / vb.height), width: newW, height: newH });
   }, [panZoom, vb, natW, natH]);
 
+  // Convert client (screen) coordinates to the nearest hex key.
+  // Uses nearest-center (Voronoi) which is exact for a regular hex tiling — no
+  // circular threshold needed. minX/minY are derived fresh from pixelsRef each
+  // call so there is no stale-closure risk.
+  const clientToHexKey = useCallback((clientX, clientY) => {
+    const pts = pixelsRef.current;
+    if (!svgRef.current || !pts.length) return null;
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = vb.x + (clientX - rect.left) / rect.width  * vb.width;
+    const svgY = vb.y + (clientY - rect.top)  / rect.height * vb.height;
+    // Compute SVG-space hex centers from raw pixel positions.
+    // cx = h.x - liveMinX + PAD/2  where liveMinX = min(h.x) - PAD
+    let liveMinX = pts[0].x, liveMinY = pts[0].y;
+    for (const h of pts) {
+      if (h.x < liveMinX) liveMinX = h.x;
+      if (h.y < liveMinY) liveMinY = h.y;
+    }
+    liveMinX -= PAD;
+    liveMinY -= PAD;
+    let best = null, bestD = Infinity;
+    for (const h of pts) {
+      const cx = h.x - liveMinX + PAD / 2;
+      const cy = h.y - liveMinY + PAD / 2;
+      const d = (svgX - cx) ** 2 + (svgY - cy) ** 2;
+      if (d < bestD) { bestD = d; best = `${h.hex_q},${h.hex_r}`; }
+    }
+    return best;
+  }, [vb, PAD]);
+
   const onMouseDown = useCallback((e) => {
     if (!panZoom || e.button !== 0) return;
     dragRef.current = { startX: e.clientX, startY: e.clientY, vb: { ...vb }, moved: false };
   }, [panZoom, vb]);
 
   const onMouseMove = useCallback((e) => {
+    if (unitDragActiveRef.current) {
+      onDragMove?.(clientToHexKey(e.clientX, e.clientY));
+      return;
+    }
     if (!dragRef.current) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
@@ -154,9 +480,18 @@ export default function HexGrid({
     const sx = dragRef.current.vb.width  / rect.width;
     const sy = dragRef.current.vb.height / rect.height;
     setVb({ ...dragRef.current.vb, x: dragRef.current.vb.x - dx * sx, y: dragRef.current.vb.y - dy * sy });
-  }, []);
+  }, [clientToHexKey, onDragMove]);
 
-  const onMouseUp = useCallback(() => { dragRef.current = null; }, []);
+  const onMouseUp = useCallback((e) => {
+    if (unitDragActiveRef.current) {
+      unitDragActiveRef.current = false;
+      const key = clientToHexKey(e.clientX, e.clientY);
+      const hex = key ? pixelsRef.current.find(h => `${h.hex_q},${h.hex_r}` === key) : null;
+      onDragEnd?.(hex ?? null);
+      return;
+    }
+    dragRef.current = null;
+  }, [clientToHexKey, onDragEnd]);
 
   const handleHexClick = useCallback((h) => {
     if (dragRef.current?.moved) return;
@@ -192,7 +527,7 @@ export default function HexGrid({
     <svg
       ref={svgRef}
       viewBox={viewBox}
-      style={{ width: '100%', height: '100%', cursor: (moveMode || bombardMode) ? 'crosshair' : (panZoom ? 'grab' : 'default'), display: 'block' }}
+      style={{ width: '100%', height: '100%', cursor: reachableKeys?.size > 0 ? 'grabbing' : (moveMode || bombardMode) ? 'crosshair' : (panZoom ? 'grab' : 'default'), display: 'block', userSelect: 'none' }}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
@@ -210,7 +545,7 @@ export default function HexGrid({
         const isInPath = movePathKeys.has(hexKey);
         const isBombardTarget = hexKey === bombardTargetKey;
         const baseColor = isDark ? '#080d15' : (TERRAIN_COLORS[h.terrain] ?? '#334155');
-        const topUnits = isDark || isScouted ? [] : getTopUnits(h.units);
+        const showUnits = !isDark && !isScouted;
 
         return (
           <g key={hexKey}
@@ -245,6 +580,18 @@ export default function HexGrid({
               />
             )}
 
+            {/* Bombard range highlight */}
+            {bombardRangeKeys?.has(hexKey) && !isBombardTarget && (
+              <polygon
+                points={hexCorners(cx, cy, SIZE - 1)}
+                fill="rgba(239,68,68,0.12)"
+                stroke="#ef4444"
+                strokeWidth={1}
+                strokeDasharray="3,2"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
             {/* Bombard target highlight */}
             {isBombardTarget && (
               <polygon
@@ -256,12 +603,23 @@ export default function HexGrid({
               />
             )}
 
+            {/* Drag reachable range highlight */}
+            {reachableKeys?.has(hexKey) && (
+              <polygon
+                points={hexCorners(cx, cy, SIZE - 1)}
+                fill={hexKey === dragOverKey ? 'rgba(34,197,94,0.45)' : 'rgba(34,197,94,0.18)'}
+                stroke="#22c55e"
+                strokeWidth={hexKey === dragOverKey ? 2.5 : 1.2}
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
             {/* Owner tint border */}
             {h.owner_faction_id && !isDark && (
               <polygon
                 points={hexCorners(cx, cy, SIZE - 1)}
                 fill="none"
-                stroke={topUnits[0]?.factionColor ?? '#60a5fa'}
+                stroke={h.units?.[0]?.factionColor ?? '#60a5fa'}
                 strokeWidth={3}
                 opacity={0.6}
               />
@@ -275,19 +633,16 @@ export default function HexGrid({
               <polygon points={hexCorners(cx, cy, SIZE - 1)} fill="rgba(30,130,50,0.40)" stroke="none" style={{ pointerEvents: 'none' }} />
             )}
 
-            {/* Settlement star */}
-            {!isDark && h.has_settlement && (
-              <text x={cx + SIZE * 0.45} y={cy - SIZE * 0.42} textAnchor="middle" fontSize={11}
-                fill="#fbbf24" style={{ pointerEvents: 'none', userSelect: 'none' }}>★</text>
-            )}
+            {/* Terrain features — mountains and hills */}
+            {!isDark && h.terrain === 'mountains' && renderMountains(cx, cy)}
+            {!isDark && h.terrain === 'hills' && renderHills(cx, cy)}
 
-            {/* Terrain label (skip for settlements — name shown instead) */}
-            {!isDark && !h.has_settlement && (
-              <text x={cx} y={cy - SIZE * 0.35} textAnchor="middle" fontSize={10}
-                fill={isScouted ? '#6b7280' : '#e2e8f0'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                {h.terrain}
-              </text>
-            )}
+            {/* Vegetation icons on top of terrain */}
+            {!isDark && h.has_heavy_vegetation && renderVegetation(cx, cy, true)}
+            {!isDark && h.has_light_vegetation && !h.has_heavy_vegetation && renderVegetation(cx, cy, false)}
+
+            {/* Settlement buildings — tier based on settlement_size */}
+            {!isDark && h.has_settlement && renderSettlement(cx, cy, h.settlement_size ?? 1)}
 
             {/* Settlement name label */}
             {!isDark && h.has_settlement && h.settlement_name && (
@@ -305,26 +660,19 @@ export default function HexGrid({
               </>
             )}
 
-            {/* Coordinates (small, for debugging) */}
-            <text x={cx} y={cy + SIZE * 0.5 - 4} textAnchor="middle" fontSize={8}
-              fill={isDark ? '#1f2937' : '#475569'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-              {h.hex_q},{h.hex_r}
-            </text>
+            {/* Fortification castle icon */}
+            {!isDark && h.buildings?.some(b => b.type === 'fortification' && b.current_hp > 0) && renderFortification(cx, cy)}
 
-            {/* Unit icons */}
-            {topUnits.map((u, i) => {
-              const ux = cx - (topUnits.length - 1) * 8 + i * 16;
-              const uy = cy - 3;
-              return (
-                <g key={i}>
-                  <circle cx={ux} cy={uy} r={9} fill="#0f172a" opacity={0.8} />
-                  <text x={ux} y={uy + 4} textAnchor="middle" fontSize={9}
-                    fill={u.factionColor ?? '#60a5fa'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                    {u.type?.[0] ?? '?'}{u.quantity > 1 ? u.quantity : ''}
-                  </text>
-                </g>
-              );
-            })}
+            {/* Coordinates — GM only */}
+            {showCoords && (
+              <text x={cx} y={cy + SIZE * 0.5 - 4} textAnchor="middle" fontSize={8}
+                fill={isDark ? '#1f2937' : '#475569'} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                {h.hex_q},{h.hex_r}
+              </text>
+            )}
+
+            {/* Unit icons — all units, per-faction rows, scaled to fit */}
+            {showUnits && renderHexUnits(h, cx, cy, playerFactionId, dragUnitId, onUnitClick, onUnitDragStart, unitDragActiveRef)}
           </g>
         );
       })}

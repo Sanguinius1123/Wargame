@@ -437,6 +437,7 @@ export async function executeGroundMoves(db, gameId, turn) {
         faction_id,
         unit_type_id,
         quantity,
+        standing_order,
         unit_type_config!inner (
           id,
           name,
@@ -583,14 +584,17 @@ export async function executeGroundMoves(db, gameId, turn) {
       }
     }
 
-    // Delete mover units that were eliminated (patrol_wins outcome).
+    // Delete eliminated movers (patrol_wins); write quantity for surviving cancelled movers (tie).
     for (const move of validMoves) {
       if (!interceptResult.cancelledMoves.has(move.unitId)) continue;
-      // Only delete if the mover's quantity was driven to 0 — check working copy.
       const moverEntry = unitPathMap.get(move.unitId);
       if (moverEntry && moverEntry.unit.quantity <= 0) {
         const { error } = await db.from('units').delete().eq('id', move.unitId);
         if (error) errors.push(`Patrol intercept: failed to delete eliminated mover ${move.unitId} — ${error.message}`);
+      } else if (moverEntry && moverEntry.unit.quantity > 0) {
+        // Mover took casualties but survived (tie). Persist updated quantity.
+        const { error } = await db.from('units').update({ quantity: moverEntry.unit.quantity }).eq('id', move.unitId);
+        if (error) errors.push(`Patrol intercept: failed to update cancelled mover ${move.unitId} — ${error.message}`);
       }
     }
 
@@ -607,6 +611,177 @@ export async function executeGroundMoves(db, gameId, turn) {
         validMoves.splice(i, 1);
         skipped++;
       }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 4c. Path-crossing border battle.
+  //
+  //     A crossing occurs when unit A (origin→dest) and unit B (origin→dest)
+  //     are swapping hexes: A's origin == B's dest AND B's origin == A's dest.
+  //     Both must be enemy factions. Both fight simultaneously; the loser stays
+  //     in their origin hex (move cancelled), the winner continues. Tie = both
+  //     stay.
+  // ------------------------------------------------------------------
+  {
+    const crossCancelled = new Set();
+    const crossCombatLog = [];
+
+    for (let i = 0; i < validMoves.length; i++) {
+      const a = validMoves[i];
+      if (crossCancelled.has(a.unitId)) continue;
+      const aEntry = unitPathMap.get(a.unitId);
+      if (!aEntry) continue;
+
+      for (let j = i + 1; j < validMoves.length; j++) {
+        const b = validMoves[j];
+        if (crossCancelled.has(b.unitId)) continue;
+        const bEntry = unitPathMap.get(b.unitId);
+        if (!bEntry) continue;
+
+        // Check faction — only enemies trigger border battle.
+        if (a.unit.faction_id === b.unit.faction_id) continue;
+
+        // Check crossing: A's origin is B's dest, B's origin is A's dest.
+        const aOriginKey = `${a.unit.hex_q},${a.unit.hex_r}`;
+        const bOriginKey = `${b.unit.hex_q},${b.unit.hex_r}`;
+        const aDestKey   = `${a.finalQ},${a.finalR}`;
+        const bDestKey   = `${b.finalQ},${b.finalR}`;
+
+        if (aOriginKey !== bDestKey || bOriginKey !== aDestKey) continue;
+
+        const aCfg = aEntry.unitType;
+        const bCfg = bEntry.unitType;
+
+        // Safety mode: stealth units with safety on only fight if detected.
+        // Path-crossing distance = 1 (adjacent hexes).
+        const aSafety = a.unit.standing_order === 'safety' && (aCfg.stealth_rating ?? 0) > 0;
+        const bSafety = b.unit.standing_order === 'safety' && (bCfg.stealth_rating ?? 0) > 0;
+        const aDetectedByB = !aSafety || detectionCheck(bCfg.detection_rating ?? 0, aCfg.stealth_rating, 1);
+        const bDetectedByA = !bSafety || detectionCheck(aCfg.detection_rating ?? 0, bCfg.stealth_rating, 1);
+
+        // If neither detects the other (both in safety mode), both sneak through.
+        if (!aDetectedByB && !bDetectedByA) continue;
+
+        // Border battle — only detected units participate.
+        let aCas = 0;
+        let bCas = 0;
+        const rollLog = [];
+
+        // A fires at B (only if A is detected by B — otherwise A is sneaking)
+        if (aDetectedByB && aCfg.to_hit != null) {
+          for (let d = 0; d < a.unit.quantity; d++) {
+            const atk = roll2d6();
+            if (atk <= aCfg.to_hit) {
+              const saveTarget = Math.max(0, (bCfg.defense ?? 6) - (aCfg.penetration ?? 0));
+              if (roll2d6() > saveTarget) {
+                bCas++;
+                rollLog.push(`A die ${d+1}: HIT → B casualty`);
+              } else {
+                rollLog.push(`A die ${d+1}: HIT → saved`);
+              }
+            } else {
+              rollLog.push(`A die ${d+1}: miss`);
+            }
+          }
+        } else if (!aDetectedByB) {
+          rollLog.push(`A (${aCfg.name}): undetected — safety hold fire`);
+        }
+
+        // B fires at A (only if B is detected by A — otherwise B is sneaking)
+        if (bDetectedByA && bCfg.to_hit != null) {
+          for (let d = 0; d < b.unit.quantity; d++) {
+            const atk = roll2d6();
+            if (atk <= bCfg.to_hit) {
+              const saveTarget = Math.max(0, (aCfg.defense ?? 6) - (bCfg.penetration ?? 0));
+              if (roll2d6() > saveTarget) {
+                aCas++;
+                rollLog.push(`B die ${d+1}: HIT → A casualty`);
+              } else {
+                rollLog.push(`B die ${d+1}: HIT → saved`);
+              }
+            } else {
+              rollLog.push(`B die ${d+1}: miss`);
+            }
+          }
+        } else if (!bDetectedByA) {
+          rollLog.push(`B (${bCfg.name}): undetected — safety hold fire`);
+        }
+
+        // Apply casualties.
+        a.unit.quantity = Math.max(0, a.unit.quantity - aCas);
+        b.unit.quantity = Math.max(0, b.unit.quantity - bCas);
+
+        const aEliminated = a.unit.quantity <= 0;
+        const bEliminated = b.unit.quantity <= 0;
+
+        // Eliminated units always stop.
+        if (aEliminated) crossCancelled.add(a.unitId);
+        if (bEliminated) crossCancelled.add(b.unitId);
+
+        // Undetected safety units continue regardless (they were sneaking).
+        // Detected units that didn't win (tie or loss) stop.
+        if (!aEliminated) {
+          if (aDetectedByB && !bEliminated) crossCancelled.add(a.unitId); // tie or loss
+          // aDetectedByB && bEliminated → A won, continues
+          // !aDetectedByB → A was sneaking, continues
+        }
+        if (!bEliminated) {
+          if (bDetectedByA && !aEliminated) crossCancelled.add(b.unitId); // tie or loss
+          // bDetectedByA && aEliminated → B won, continues
+          // !bDetectedByA → B was sneaking, continues
+        }
+
+        // Delete eliminated units from DB.
+        if (aEliminated) {
+          const { error } = await db.from('units').delete().eq('id', a.unitId);
+          if (error) errors.push(`Path crossing: failed to delete unit ${a.unitId} — ${error.message}`);
+        }
+        if (bEliminated) {
+          const { error } = await db.from('units').delete().eq('id', b.unitId);
+          if (error) errors.push(`Path crossing: failed to delete unit ${b.unitId} — ${error.message}`);
+        }
+
+        crossCombatLog.push({
+          game_id: gameId, turn, phase: 3,
+          hex_q: a.finalQ, hex_r: a.finalR,
+          log_type: 'ground_path_crossing',
+          faction_id: null,
+          data: {
+            unit_a: a.unitId, unit_b: b.unitId,
+            a_origin: aOriginKey, b_origin: bOriginKey,
+            a_cas: aCas, b_cas: bCas,
+            a_qty_after: a.unit.quantity, b_qty_after: b.unit.quantity,
+            outcome: aEliminated && bEliminated ? 'mutual_destruction'
+              : aEliminated ? 'b_wins'
+              : bEliminated ? 'a_wins'
+              : 'tie_both_stop',
+            roll_log: rollLog,
+          },
+        });
+      }
+    }
+
+    // Write quantity updates for cancelled-but-surviving border battle units.
+    // Step 5 only runs for non-cancelled moves, so casualties must be persisted here.
+    for (const move of validMoves) {
+      if (!crossCancelled.has(move.unitId)) continue;
+      if (move.unit.quantity <= 0) continue; // already deleted above
+      const { error } = await db.from('units').update({ quantity: move.unit.quantity }).eq('id', move.unitId);
+      if (error) errors.push(`Path crossing: failed to update quantity for unit ${move.unitId} — ${error.message}`);
+    }
+
+    // Remove crossing-cancelled moves from validMoves.
+    for (let i = validMoves.length - 1; i >= 0; i--) {
+      if (crossCancelled.has(validMoves[i].unitId)) {
+        validMoves.splice(i, 1);
+        skipped++;
+      }
+    }
+
+    if (crossCombatLog.length > 0) {
+      const { error: logErr } = await db.from('combat_log').insert(crossCombatLog);
+      if (logErr) errors.push(`Path crossing: failed to insert combat log — ${logErr.message}`);
     }
   }
 

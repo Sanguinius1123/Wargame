@@ -48,36 +48,101 @@ router.post('/', requireGM, async (req, res) => {
     );
   }
 
-  // Optionally seed hexes from a saved map template
+  // Optionally seed hexes, factions, and units from a saved map template
   if (map_id) {
-    const { data: mapHexes } = await adminDb
-      .from('map_hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
-      .eq('map_id', map_id);
+    const [{ data: mapHexes }, { data: mapFactions }, { data: mapUnits }] = await Promise.all([
+      adminDb.from('map_hexes')
+        .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad, vegetation_hp')
+        .eq('map_id', map_id),
+      adminDb.from('map_factions')
+        .select('name, color, slot')
+        .eq('map_id', map_id)
+        .order('slot'),
+      adminDb.from('map_units')
+        .select('faction_name, hex_q, hex_r, unit_type_name, quantity')
+        .eq('map_id', map_id),
+    ]);
+
     if (mapHexes?.length) {
-      await adminDb.from('hexes').insert(mapHexes.map(h => ({ game_id: game.id, ...h })));
+      await adminDb.from('hexes').insert(mapHexes.map(h => ({
+        game_id: game.id, ...h,
+        vegetation_hp: h.vegetation_hp ?? (h.has_heavy_vegetation ? 20 : h.has_light_vegetation ? 8 : null),
+      })));
+    }
+
+    // Create game factions from map faction slots (no player assigned yet)
+    const factionMap = {}; // name → faction_id
+    if (mapFactions?.length) {
+      for (const mf of mapFactions) {
+        const { data: faction } = await adminDb.from('factions')
+          .insert({ game_id: game.id, name: mf.name, color: mf.color, profile_id: null })
+          .select('id, name').single();
+        if (faction) factionMap[faction.name] = faction.id;
+      }
+    }
+
+    // Place pre-placed units from the map template
+    if (mapUnits?.length && Object.keys(factionMap).length) {
+      const { data: unitTypes } = await adminDb.from('unit_type_config')
+        .select('id, name').eq('game_id', game.id);
+      const typeByName = Object.fromEntries((unitTypes ?? []).map(t => [t.name, t.id]));
+
+      const unitRows = mapUnits
+        .filter(u => factionMap[u.faction_name] && typeByName[u.unit_type_name])
+        .map(u => ({
+          game_id: game.id,
+          faction_id: factionMap[u.faction_name],
+          unit_type_id: typeByName[u.unit_type_name],
+          hex_q: u.hex_q, hex_r: u.hex_r, quantity: u.quantity,
+        }));
+
+      if (unitRows.length) {
+        await adminDb.from('units').insert(unitRows);
+      }
     }
   }
 
   res.status(201).json(game);
 });
 
-// POST /api/games/:gameId/factions — GM adds a faction (player slot)
+// POST /api/games/:gameId/factions — GM adds a faction slot
+// profile_id is optional; factions can exist without an assigned player.
 router.post('/:gameId/factions', requireGM, async (req, res) => {
   const { profile_id, name, color } = req.body;
-  if (!profile_id || !name) return res.status(400).json({ error: 'profile_id and name required' });
+  if (!name) return res.status(400).json({ error: 'name required' });
 
   const { data, error } = await adminDb
     .from('factions')
-    .insert({ game_id: req.params.gameId, profile_id, name, color: color ?? '#3b82f6' })
+    .insert({ game_id: req.params.gameId, profile_id: profile_id || null, name, color: color ?? '#3b82f6' })
     .select()
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
 
-  await adminDb.from('game_participants').upsert({ game_id: req.params.gameId, profile_id, role: 'player' });
+  if (profile_id) {
+    await adminDb.from('game_participants').upsert(
+      { game_id: req.params.gameId, profile_id, role: 'player' },
+      { onConflict: 'game_id,profile_id' }
+    );
+  }
 
   res.status(201).json(data);
+});
+
+// PATCH /api/games/:gameId — rename the game
+router.patch('/:gameId', requireGM, async (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name required' });
+
+  const { data, error } = await adminDb
+    .from('games')
+    .update({ name: name.trim() })
+    .eq('id', req.params.gameId)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // GET /api/games/:gameId/factions

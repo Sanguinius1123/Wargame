@@ -183,7 +183,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   let hexRows;
   try {
     hexRows = await fetchAll(() => db.from('hexes')
-      .select('hex_q, hex_r, terrain, has_light_vegetation, has_heavy_vegetation, terrain_type_config(defense_bonus)')
+      .select('hex_q, hex_r, terrain, vegetation_hp, has_light_vegetation, has_heavy_vegetation, terrain_type_config(defense_bonus)')
       .eq('game_id', gameId));
   } catch (e) {
     return {
@@ -245,7 +245,8 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   // -------------------------------------------------------------------------
   const casualties = new Map();         // unit_id → cumulative casualty count
   const infraDamageAcc = new Map();     // building_id → cumulative HP damage
-  const vegDamageAcc = new Map();       // hexKey → { tq, tr, clearHeavy?, clearLight? }
+  const vegHpDamageAcc = new Map();     // hexKey → { tq, tr, damage }
+  const currentVegHpBySalvo = new Map(); // hexKey → current veg HP this turn (tracks mid-salvo state)
   const combatLogInserts = [];
 
   // =========================================================================
@@ -283,6 +284,10 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
       }
     }
 
+    // Cannot bombard if enemies are in own hex (locked in close combat).
+    const ownHexFactions = hexFactionMap.get(`${unit.hex_q},${unit.hex_r}`);
+    if (ownHexFactions && [...ownHexFactions.keys()].some(fid => fid !== unit.faction_id)) continue;
+
     const targetHexKey = `${tq},${tr}`;
     const targetHex = hexDataByKey.get(targetHexKey) ?? {
       has_light_vegetation: false,
@@ -308,6 +313,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     // --- Dice vs units (if any units in target hex) ---
     let hitsVsUnits = 0;
     const unitCasualtiesThisBombard = new Map();
+    const unitRollLog = []; // per-unit roll detail for combat log
 
     if (unitsInTargetHex.length > 0 && diceCount > 0) {
       // Distribute dice among target units proportionally by effective count.
@@ -325,6 +331,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
           b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === targetUnit.faction_id
         );
         const bonus = defenseBonus(targetUnit, targetHex, hasFortBuilding);
+        const rolls = [];
 
         for (let d = 0; d < dice; d++) {
           const result = rollAttackAndSave(toHit, targetCfg.defense, bonus, pen);
@@ -336,7 +343,23 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
               (unitCasualtiesThisBombard.get(targetUnit.id) ?? 0) + 1
             );
           }
+          rolls.push({
+            atk: result.attackRoll,
+            hit: result.hit,
+            save: result.saveRoll ?? null,
+            save_target: result.saveTarget ?? null,
+            casualty: result.casualty,
+          });
         }
+
+        unitRollLog.push({
+          unit_type: targetCfg.name,
+          quantity: targetUnit.quantity,
+          faction_id: targetUnit.faction_id,
+          defense: targetCfg.defense,
+          bonus,
+          rolls,
+        });
       }
     }
 
@@ -346,8 +369,12 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
     let hitsVsInfra = 0;
     const buildingsInHex = buildingsByHex.get(targetHexKey) ?? [];
     const infraPool = [...buildingsInHex.map(b => ({ kind: 'building', b }))];
-    if (targetHex.has_heavy_vegetation) infraPool.push({ kind: 'veg', level: 'heavy' });
-    else if (targetHex.has_light_vegetation) infraPool.push({ kind: 'veg', level: 'light' });
+    // Use mid-salvo HP if this hex was already bombarded earlier this turn
+    const vegHpNow = currentVegHpBySalvo.has(targetHexKey)
+      ? currentVegHpBySalvo.get(targetHexKey)
+      : (targetHex.vegetation_hp ?? 0);
+    if (vegHpNow >= 11) infraPool.push({ kind: 'veg', level: 'heavy' });
+    else if (vegHpNow >= 1) infraPool.push({ kind: 'veg', level: 'light' });
 
     for (let d = 0; d < diceCount; d++) {
       const infraRoll = roll2d6();
@@ -360,20 +387,23 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
       if (picked.kind === 'building') {
         infraDamageAcc.set(picked.b.id, (infraDamageAcc.get(picked.b.id) ?? 0) + 1);
       } else {
-        // Vegetation: roll 1d6 — 4+ degrades it
-        const vegRoll = Math.ceil(Math.random() * 6);
-        if (vegRoll >= 4) {
-          const hexKey = targetHexKey;
-          if (!vegDamageAcc.has(hexKey)) vegDamageAcc.set(hexKey, { tq, tr });
-          const entry = vegDamageAcc.get(hexKey);
-          if (picked.level === 'heavy') entry.clearHeavy = true;
-          else entry.clearLight = true;
-          // Update pool so further hits in same salvo see degraded state
+        // Vegetation: each hit reduces HP by 1; no secondary roll needed.
+        if (!currentVegHpBySalvo.has(targetHexKey)) {
+          currentVegHpBySalvo.set(targetHexKey, targetHex.vegetation_hp ?? 0);
+        }
+        const prevHp = currentVegHpBySalvo.get(targetHexKey);
+        if (prevHp <= 0) { infraPool.splice(infraPool.indexOf(picked), 1); }
+        else {
+          const newHp = prevHp - 1;
+          currentVegHpBySalvo.set(targetHexKey, newHp);
+          if (!vegHpDamageAcc.has(targetHexKey)) vegHpDamageAcc.set(targetHexKey, { tq, tr, damage: 0 });
+          vegHpDamageAcc.get(targetHexKey).damage += 1;
+          // Update pool if threshold crossed this hit
           const idx = infraPool.indexOf(picked);
-          if (picked.level === 'heavy') {
-            infraPool.splice(idx, 1, { kind: 'veg', level: 'light' });
-          } else {
+          if (newHp <= 0) {
             infraPool.splice(idx, 1);
+          } else if (newHp <= 10 && picked.level === 'heavy') {
+            infraPool.splice(idx, 1, { kind: 'veg', level: 'light' });
           }
         }
       }
@@ -405,6 +435,8 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
       data: {
         firer_unit_id: unitId,
         firer_faction_id: unit.faction_id,
+        firer_type: cfg.name,
+        firer_count: diceCount,
         firer_hex: { q: unit.hex_q, r: unit.hex_r },
         target_hex: { q: tq, r: tr },
         dice: diceCount,
@@ -413,6 +445,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
         hits_vs_units: hitsVsUnits,
         hits_vs_infra: hitsVsInfra,
         casualties: casualtiesSummary,
+        unit_rolls: unitRollLog,
       },
     });
   }
@@ -493,26 +526,22 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   }
 
   // =========================================================================
-  // 9b. Apply vegetation degradation.
+  // 9b. Apply vegetation HP damage and sync boolean flags.
   // =========================================================================
-  for (const [, { tq, tr, clearHeavy, clearLight }] of vegDamageAcc) {
-    const hexRow = hexDataByKey.get(`${tq},${tr}`);
+  for (const [hexKey, { tq, tr, damage }] of vegHpDamageAcc) {
+    const hexRow = hexDataByKey.get(hexKey);
     if (!hexRow) continue;
-    const update = {};
-    if (clearHeavy) {
-      update.has_heavy_vegetation = false;
-      update.has_light_vegetation = true; // heavy degrades to light
-    } else if (clearLight) {
-      update.has_light_vegetation = false;
-    }
-    if (Object.keys(update).length > 0) {
-      const { error } = await db.from('hexes')
-        .update(update)
-        .eq('game_id', gameId)
-        .eq('hex_q', tq)
-        .eq('hex_r', tr);
-      if (error) errors.push(`Failed to update vegetation at (${tq},${tr}): ${error.message}`);
-    }
+    const newHp = Math.max(0, (hexRow.vegetation_hp ?? 0) - damage);
+    const { error } = await db.from('hexes')
+      .update({
+        vegetation_hp:        newHp,
+        has_heavy_vegetation: newHp >= 11,
+        has_light_vegetation: newHp >= 1 && newHp <= 10,
+      })
+      .eq('game_id', gameId)
+      .eq('hex_q', tq)
+      .eq('hex_r', tr);
+    if (error) errors.push(`Failed to update vegetation at (${tq},${tr}): ${error.message}`);
   }
 
   // =========================================================================

@@ -258,7 +258,7 @@ export async function processAirEmergencyScramble(db, gameId) {
         && b.owner_faction_id === unit.faction_id
       );
 
-      const maxRange = unit.unit_type_config?.move ?? 30;
+      const maxRange = Math.floor((unit.unit_type_config?.move ?? 30) / 3);
       let nearest = null;
       let nearestDist = Infinity;
 
@@ -355,7 +355,7 @@ export async function processRepairOrders(db, gameId, currentTurn) {
 // Supply trucks build structures. One-turn build → structure at full HP,
 // truck consumed.
 // ---------------------------------------------------------------------------
-const STRUCTURE_MAX_HP = { fortification: 4, airstrip: 4 };
+const STRUCTURE_MAX_HP = { fortification: 12, airstrip: 4 };
 
 export async function processBuildOrders(db, gameId, currentTurn) {
   const { data: buildOrders } = await db
@@ -419,9 +419,46 @@ export async function resetTurnReady(db, gameId) {
 }
 
 // ---------------------------------------------------------------------------
+// mergeSameTypeStacks — runs after Phase 3 movement resolves.
+// Any two stacks of the same (faction, unit_type, hex) are combined into one.
+// This is the clean-up step for the split command: stacks that didn't get
+// different movement orders (or both ended up in the same hex) merge back.
+// ---------------------------------------------------------------------------
+export async function mergeSameTypeStacks(db, gameId) {
+  const { data: units } = await db
+    .from('units')
+    .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity')
+    .eq('game_id', gameId)
+    .order('id');
+
+  const groups = new Map();
+  for (const u of units ?? []) {
+    const key = `${u.faction_id}:${u.unit_type_id}:${u.hex_q}:${u.hex_r}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(u);
+  }
+
+  let merged = 0;
+  for (const group of groups.values()) {
+    if (group.length <= 1) continue;
+    const total = group.reduce((s, u) => s + u.quantity, 0);
+    const [keep, ...rest] = group;
+    await db.from('units').update({ quantity: total }).eq('id', keep.id);
+    for (const u of rest) {
+      await db.from('units').delete().eq('id', u.id);
+    }
+    merged += rest.length;
+  }
+  return { merged };
+}
+
+// ---------------------------------------------------------------------------
 // runPhase4 — convenience wrapper for advance-turn
 // ---------------------------------------------------------------------------
 export async function runPhase4(db, gameId, currentTurn) {
+  // Merge any split stacks that ended up in the same hex after Phase 3.
+  await mergeSameTypeStacks(db, gameId);
+
   // Air return is the first Phase 4 step per DESIGN.md.
   const scrambleResult = await processAirEmergencyScramble(db, gameId);
 

@@ -12,6 +12,13 @@ function offsetNeighbors(q, r) {
     : [{q:q-1,r},{q:q-1,r:r+1},{q,r:r-1},{q,r:r+1},{q:q+1,r},{q:q+1,r:r+1}];
 }
 
+// Hex distance for even-q flat-top offset coordinates (via cube coords).
+function hexDist(q1, r1, q2, r2) {
+  const x1 = q1, z1 = r1 - (q1 - (q1 & 1)) / 2, y1 = -x1 - z1;
+  const x2 = q2, z2 = r2 - (q2 - (q2 & 1)) / 2, y2 = -x2 - z2;
+  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2), Math.abs(z1 - z2));
+}
+
 async function authHeader() {
   const { data: { session } } = await supabase.auth.getSession();
   return { Authorization: `Bearer ${session?.access_token}` };
@@ -66,10 +73,12 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   // Split-order state: when splitting, include split_quantity with the move order
   const [splitMode, setSplitMode] = useState(false);
   const [splitQty, setSplitQty] = useState(1);
+  const pendingSplitUnitIdRef = useRef(null);
 
   // Bombard-order state
   const [bombardMode, setBombardMode] = useState(false);
   const [bombardTarget, setBombardTarget] = useState(null);
+  const [bombardRangeKeys, setBombardRangeKeys] = useState(new Set());
 
   // Retreat-order state
   const [retreatMode, setRetreatMode] = useState(false);
@@ -89,6 +98,12 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const [centerOn, setCenterOn] = useState(null);
   // Cycling index for "Next Unit" button
   const nextUnitIdxRef = useRef(0);
+
+  // Drag-and-drop move state
+  const [dragUnit, setDragUnit] = useState(null);
+  const [dragOriginHex, setDragOriginHex] = useState(null);
+  const [reachableKeys, setReachableKeys] = useState(new Set());
+  const [dragOverKey, setDragOverKey] = useState(null);
 
   // Production state (player only)
   const [unitTypes, setUnitTypes] = useState([]);
@@ -125,6 +140,23 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     loadOrderedUnits();
   }, [gameId, viewAsFactionId, refreshKey, loadOrderedUnits]);
 
+  // When the turn advances (refreshKey bumped by GameView), clear all stale order UI.
+  useEffect(() => {
+    if (refreshKey === 0) return; // skip initial mount
+    setSelectedUnit(null);
+    setMoveMode(false);
+    setMovePath([]);
+    setBombardMode(false);
+    setBombardTarget(null);
+    setBombardRangeKeys(new Set());
+    setBuildMode(false);
+    setBuildTarget(null);
+    setSplitMode(false);
+    setRetreatMode(false);
+    setCurrentOrders([]);
+    setOrderedUnitIds(new Set());
+  }, [refreshKey]);
+
   const loadProduction = useCallback(async () => {
     if (isGM) return;
     const headers = await authHeader();
@@ -147,11 +179,22 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   useEffect(() => { loadProduction(); }, [loadProduction]);
   useEffect(() => { loadFlightGroups(); }, [loadFlightGroups]);
 
-  // Keep detail panel in sync when hexes refresh (e.g. after GM +/- unit)
+  // Keep detail panel in sync when hexes refresh (e.g. after GM +/- unit or turn advance)
   useEffect(() => {
     if (!selected) return;
     const updated = hexes.find(h => h.hex_q === selected.hex_q && h.hex_r === selected.hex_r);
-    if (updated) setSelected(updated);
+    if (!updated) return;
+    setSelected(updated);
+    // After a Split Here, auto-select the newly created unit so the player can give it orders
+    if (pendingSplitUnitIdRef.current) {
+      const splitUnit = updated.units?.find(u => u.id === pendingSplitUnitIdRef.current);
+      pendingSplitUnitIdRef.current = null;
+      if (splitUnit) { setSelectedUnit(splitUnit); return; }
+    }
+    if (selectedUnit) {
+      const refreshed = updated.units?.find(u => u.id === selectedUnit.id);
+      if (refreshed) setSelectedUnit(refreshed);
+    }
   }, [hexes]);
 
   const selectedKey = selected ? `${selected.hex_q},${selected.hex_r}` : null;
@@ -246,6 +289,25 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     }
   }, [isGM, viewAsFactionId, fetchOrders, onHexSelect]);
 
+  // Called when the player clicks directly on a unit badge on the map
+  const handleUnitClick = useCallback((unit, hex) => {
+    setSelected(hex);
+    if (onHexSelect) onHexSelect(hex);
+    setSelectedUnit(unit);
+    setMoveMode(false);
+    setMovePath([]);
+    setBombardMode(false);
+    setBombardTarget(null);
+    setBuildMode(false);
+    setBuildTarget(null);
+    setBuildStructureType('');
+    setFlightGroupMode(false);
+    setFlightGroupPath([]);
+    setSplitMode(false);
+    setCurrentOrders([]);
+    fetchOrders(unit.id, hex);
+  }, [fetchOrders, onHexSelect]);
+
   // Called when a hex is clicked during move, bombard, build, or flight group mode
   const handleModeClick = useCallback((hex) => {
     if (flightGroupMode) {
@@ -329,16 +391,47 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     setMovePath([]);
   }, []);
 
+  const confirmSplitHere = useCallback(async () => {
+    if (!selectedUnit || splitQty < 1) return;
+    const headers = await authHeader();
+    const resp = await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: selectedUnit.id,
+        split_quantity: splitQty,
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    if (!resp.ok) return;
+    const { split_unit_id } = await resp.json();
+    // Store the new unit's ID so the useEffect can auto-select it after hexes reload
+    if (split_unit_id) pendingSplitUnitIdRef.current = split_unit_id;
+    setSplitMode(false);
+    setSplitQty(1);
+    await load();
+  }, [selectedUnit, splitQty, gameId, viewAsFactionId, load]);
+
   const enterBombardMode = useCallback(() => {
     if (!selectedUnit) return;
+    const range = selectedUnit.bombard_range ?? 0;
+    const rk = new Set();
+    if (range > 0 && selected) {
+      for (const h of hexes) {
+        const d = hexDist(selected.hex_q, selected.hex_r, h.hex_q, h.hex_r);
+        if (d > 0 && d <= range) rk.add(`${h.hex_q},${h.hex_r}`);
+      }
+    }
+    setBombardRangeKeys(rk);
     setBombardMode(true);
     setBombardTarget(null);
     setCurrentOrders([]);
-  }, [selectedUnit]);
+  }, [selectedUnit, selected, hexes]);
 
   const cancelBombard = useCallback(() => {
     setBombardMode(false);
     setBombardTarget(null);
+    setBombardRangeKeys(new Set());
     fetchOrders(selectedUnit?.id ?? null);
   }, [selectedUnit, fetchOrders]);
 
@@ -358,6 +451,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     });
     setBombardMode(false);
     setBombardTarget(null);
+    setBombardRangeKeys(new Set());
     setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
     await fetchOrders(selectedUnit.id);
     loadOrderedUnits();
@@ -446,11 +540,17 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const setPatrolOrder = useCallback(async (patrolValue) => {
     if (!selectedUnit) return;
     const headers = await authHeader();
-    await fetch(`${SERVER}/api/map/${gameId}/units/${selectedUnit.id}/standing-order`, {
+    const resp = await fetch(`${SERVER}/api/map/${gameId}/units/${selectedUnit.id}/standing-order`, {
       method: 'PATCH',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ standing_order: patrolValue }),
+      body: JSON.stringify({ standing_order: patrolValue ?? null }),
     });
+    if (!resp.ok) {
+      console.error('standing-order PATCH failed:', await resp.text());
+      return;
+    }
+    // Optimistic update so the button flips immediately.
+    setSelectedUnit(prev => prev ? { ...prev, standing_order: patrolValue ?? null } : prev);
     await load();
   }, [selectedUnit, gameId, load]);
 
@@ -582,6 +682,175 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     }
   }, [gameId, loadProduction]);
 
+  // Terrain movement costs matching terrain_type_config in DB (server/movement.js uses these directly).
+  const FOOT_COST  = { plains:1, hills:1, mountains:1, desert:1, wetlands:1, water:Infinity };
+  const MECH_COST  = { plains:1, hills:2, mountains:Infinity, desert:1, wetlands:Infinity, water:Infinity };
+  const NAVAL_COST = { plains:Infinity, hills:Infinity, mountains:Infinity, desert:Infinity, wetlands:Infinity, water:1 };
+
+  const computeReachable = useCallback((unit, originHex, ownFactionId) => {
+    const budget = unit.move ?? 1;
+    const isNaval = unit.tags?.includes('naval');
+    const isMech  = unit.tags?.includes('mechanized');
+    const costMap = isNaval ? NAVAL_COST : (isMech ? MECH_COST : FOOT_COST);
+    const hexByKey = new Map(hexes.map(h => [`${h.hex_q},${h.hex_r}`, h]));
+    const visited = new Map([[`${originHex.hex_q},${originHex.hex_r}`, budget]]);
+    const queue = [{ q: originHex.hex_q, r: originHex.hex_r, remaining: budget }];
+    while (queue.length > 0) {
+      const { q, r, remaining } = queue.shift();
+      for (const { q: nq, r: nr } of offsetNeighbors(q, r)) {
+        const key = `${nq},${nr}`;
+        const hex = hexByKey.get(key);
+        if (!hex) continue;
+        let cost = costMap[hex.terrain] ?? Infinity;
+        if (!isNaval && isMech && hex.has_heavy_vegetation) cost = Infinity;
+        if (cost === Infinity) continue;
+        const newRemaining = remaining - cost;
+        if (newRemaining < 0) continue;
+        const existing = visited.get(key);
+        if (existing !== undefined && existing >= newRemaining) continue;
+        visited.set(key, newRemaining);
+        queue.push({ q: nq, r: nr, remaining: newRemaining });
+      }
+    }
+    const result = new Set(visited.keys());
+    result.delete(`${originHex.hex_q},${originHex.hex_r}`);
+
+    // Server single-step override: any passable adjacent hex is always reachable
+    // regardless of budget, matching validatePath() in movement.js.
+    for (const { q: nq, r: nr } of offsetNeighbors(originHex.hex_q, originHex.hex_r)) {
+      const key = `${nq},${nr}`;
+      if (result.has(key)) continue;
+      const hex = hexByKey.get(key);
+      if (!hex) continue;
+      let cost = costMap[hex.terrain] ?? Infinity;
+      if (!isNaval && isMech && hex.has_heavy_vegetation) cost = Infinity;
+      if (cost !== Infinity) result.add(key);
+    }
+
+    // Ground units: highlight adjacent water hexes that contain a friendly Transport
+    // so the player can drag-to-load onto a docked transport.
+    if (!isNaval && ownFactionId) {
+      for (const { q: nq, r: nr } of offsetNeighbors(originHex.hex_q, originHex.hex_r)) {
+        const nbKey = `${nq},${nr}`;
+        if (result.has(nbKey)) continue;
+        const nbHex = hexByKey.get(nbKey);
+        if (!nbHex || nbHex.terrain !== 'water') continue;
+        const hasTransport = nbHex.units?.some(
+          u => u.factionId === ownFactionId && u.tags?.includes('naval') && u.type === 'Transport'
+        );
+        if (hasTransport) result.add(nbKey);
+      }
+    }
+
+    return result;
+  }, [hexes]);
+
+  // BFS (Dijkstra) pathfinder: returns the cheapest-cost path from originHex to destHex
+  // through passable terrain, not routing through enemy-occupied intermediate hexes.
+  // Returns null if no path exists.
+  const buildMovePath = useCallback((unit, originHex, destHex) => {
+    const isNaval = unit.tags?.includes('naval');
+    const isMech  = unit.tags?.includes('mechanized');
+    const costMap = isNaval ? NAVAL_COST : (isMech ? MECH_COST : FOOT_COST);
+    const hexByKey = new Map(hexes.map(h => [`${h.hex_q},${h.hex_r}`, h]));
+    const ownFId = viewAsFactionId ?? playerFactionId;
+    const startKey = `${originHex.hex_q},${originHex.hex_r}`;
+    const destKey  = `${destHex.hex_q},${destHex.hex_r}`;
+
+    const dist = new Map([[startKey, 0]]);
+    const prev = new Map([[startKey, null]]);
+    const pq = [{ key: startKey, cost: 0 }];
+
+    while (pq.length) {
+      pq.sort((a, b) => a.cost - b.cost);
+      const { key, cost } = pq.shift();
+      if (key === destKey) break;
+      const [q, r] = key.split(',').map(Number);
+      for (const { q: nq, r: nr } of offsetNeighbors(q, r)) {
+        const nKey = `${nq},${nr}`;
+        const hex = hexByKey.get(nKey);
+        if (!hex) continue;
+        let stepCost = costMap[hex.terrain] ?? Infinity;
+        if (!isNaval && isMech && hex.has_heavy_vegetation) stepCost = Infinity;
+        if (stepCost === Infinity) continue;
+        // Intermediate hexes with visible enemy units block passage (units stop on contact).
+        if (nKey !== destKey && ownFId && (hex.units ?? []).some(u => u.factionId !== ownFId)) continue;
+        const newCost = cost + stepCost;
+        if (!dist.has(nKey) || newCost < dist.get(nKey)) {
+          dist.set(nKey, newCost);
+          prev.set(nKey, key);
+          pq.push({ key: nKey, cost: newCost });
+        }
+      }
+    }
+
+    if (!prev.has(destKey)) return null;
+
+    const path = [];
+    let cur = destKey;
+    while (cur !== null) {
+      const [q, r] = cur.split(',').map(Number);
+      path.unshift({ q, r });
+      cur = prev.get(cur) ?? null;
+    }
+    return path;
+  }, [hexes, viewAsFactionId, playerFactionId]);
+
+  const handleUnitDragStart = useCallback((unit, hex) => {
+    const keys = computeReachable(unit, hex, viewAsFactionId ?? playerFactionId);
+    setDragUnit(unit);
+    setDragOriginHex(hex);
+    setReachableKeys(keys);
+    setDragOverKey(null);
+  }, [computeReachable, viewAsFactionId, playerFactionId]);
+
+  const handleDragMove = useCallback((hexKey) => {
+    setDragOverKey(hexKey ?? null);
+  }, []);
+
+  const handleDragEnd = useCallback(async (hex) => {
+    const unit = dragUnit;
+    const originHex = dragOriginHex;
+    const keys = reachableKeys;
+    setDragUnit(null);
+    setDragOriginHex(null);
+    setReachableKeys(new Set());
+    setDragOverKey(null);
+    if (!unit || !originHex || !hex) return;
+    const destKey = `${hex.hex_q},${hex.hex_r}`;
+    if (!keys.has(destKey)) return;
+    const factionId = viewAsFactionId ?? playerFactionId;
+    const isGroundUnit = !unit.tags?.includes('naval') && !unit.tags?.includes('air');
+    const destHex = hexes.find(h => h.hex_q === hex.hex_q && h.hex_r === hex.hex_r);
+    const hasTransport = isGroundUnit && destHex?.terrain === 'water' && destHex?.units?.some(
+      u => u.factionId === factionId && u.tags?.includes('naval') && u.type === 'Transport'
+    );
+    const orderType = hasTransport ? 'load' : 'move';
+    // Build the full step-by-step path (handles 2+ step moves like Armor).
+    // Falls back to direct 2-waypoint path if pathfinding fails (e.g. load order to water).
+    const path = buildMovePath(unit, originHex, destHex ?? hex)
+      ?? [{ q: originHex.hex_q, r: originHex.hex_r }, { q: hex.hex_q, r: hex.hex_r }];
+    const headers = await authHeader();
+    const resp = await fetch(`${SERVER}/api/map/${gameId}/orders`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: unit.id,
+        order_type: orderType,
+        path,
+        ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+      }),
+    });
+    if (!resp.ok) return;
+    setOrderedUnitIds(prev => new Set([...prev, unit.id]));
+    // Select the unit so the move arrow shows up in the panel
+    setSelected(originHex);
+    setSelectedUnit(unit);
+    await fetchOrders(unit.id, originHex);
+    load();
+    loadOrderedUnits();
+  }, [dragUnit, dragOriginHex, reachableKeys, hexes, gameId, viewAsFactionId, playerFactionId, fetchOrders, load, loadOrderedUnits, buildMovePath]);
+
   const ownFactionId = viewAsFactionId ?? playerFactionId;
   const isPlayerMode = !isGM || !!viewAsFactionId;
   const unorderedCount = isPlayerMode && ownFactionId
@@ -613,7 +882,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
             </button>
           </div>
         )}
-        <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 215px)', minHeight: 480, position: 'relative' }}>
+        <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 155px)', minHeight: 480, position: 'relative' }}>
           {loading
             ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
             : <HexGrid
@@ -625,6 +894,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
                 movePath={movePath}
                 bombardMode={bombardMode}
                 bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
+                bombardRangeKeys={bombardRangeKeys}
                 buildMode={buildMode || flightGroupMode || retreatMode}
                 buildTargetKey={
                   buildTarget ? `${buildTarget.q},${buildTarget.r}` :
@@ -632,6 +902,15 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
                 }
                 onPathClick={handleModeClick}
                 centerOn={centerOn}
+                playerFactionId={isPlayerMode ? ownFactionId : null}
+                reachableKeys={reachableKeys}
+                dragOverKey={dragOverKey}
+                onUnitDragStart={handleUnitDragStart}
+                onDragMove={handleDragMove}
+                onDragEnd={handleDragEnd}
+                onUnitClick={handleUnitClick}
+                showCoords={isGM}
+                dragUnitId={dragUnit?.id}
               />
           }
         </div>
@@ -706,6 +985,7 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onEnterSplitMode={enterSplitMode}
               onCancelSplit={cancelSplit}
               onSplitQtyChange={setSplitQty}
+              onConfirmSplitHere={confirmSplitHere}
             />
           : <p style={{ color: '#64748b', fontSize: 13 }}>Click a hex to inspect it.</p>}
       </div>
@@ -779,6 +1059,7 @@ function HexDetail({
   onEnterSplitMode,
   onCancelSplit,
   onSplitQtyChange,
+  onConfirmSplitHere,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -825,14 +1106,17 @@ function HexDetail({
       {vis === 'visible' && (
         <>
           {/* Hex attributes */}
-          {(hex.has_settlement || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.resource_tile) && (
+          {(hex.has_settlement || hex.has_urban || hex.has_light_vegetation || hex.has_heavy_vegetation || hex.has_airstrip || hex.has_railroad || hex.resource_tile) && (
             <div style={{ marginBottom: 10 }}>
               <p style={STAT_LABEL}>Attributes</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {hex.has_settlement && <Tag label={`Settlement (pop ${hex.settlement_size ?? 0})`} color="#fbbf24" />}
-                {hex.has_heavy_vegetation && <Tag label="Dense Forest" color="#22c55e" />}
-                {hex.has_light_vegetation && !hex.has_heavy_vegetation && <Tag label="Light Forest" color="#86efac" />}
-                {hex.resource_tile && <Tag label={`Resource (${hex.resource_tile.tile_type})`} color="#f59e0b" />}
+                {hex.has_settlement && <Tag label={`Settlement: ${hex.settlement_name ?? '—'} (pop ${hex.settlement_size ?? 0})`} color="#fbbf24" />}
+                {hex.has_urban && <Tag label="Urban" color="#94a3b8" />}
+                {hex.has_heavy_vegetation && <Tag label={`Dense Forest (${hex.vegetation_hp ?? '?'} HP)`} color="#22c55e" />}
+                {hex.has_light_vegetation && !hex.has_heavy_vegetation && <Tag label={`Light Forest (${hex.vegetation_hp ?? '?'} HP)`} color="#86efac" />}
+                {hex.has_airstrip && <Tag label="Airstrip" color="#7dd3fc" />}
+                {hex.has_railroad && <Tag label="Railroad" color="#b0bec5" />}
+                {hex.resource_tile && <Tag label={`Resource: ${hex.resource_tile.tile_type}`} color="#f59e0b" />}
               </div>
             </div>
           )}
@@ -895,6 +1179,7 @@ function HexDetail({
                       }}
                     >
                       {u.type}{u.hp != null ? ` ${u.hp}HP` : ` ×${u.quantity}`}
+                      {u.fortification_level === 1 && <span style={{ color: '#f59e0b', fontSize: 11, marginLeft: 4 }}>⛏</span>}
                     </button>
                   );
                 }
@@ -949,6 +1234,7 @@ function HexDetail({
               onEnterSplitMode={onEnterSplitMode}
               onCancelSplit={onCancelSplit}
               onSplitQtyChange={onSplitQtyChange}
+              onConfirmSplitHere={onConfirmSplitHere}
             />
           )}
 
@@ -1026,12 +1312,11 @@ const TERRAINS = ['plains', 'hills', 'mountains', 'desert', 'wetlands', 'water']
 
 function GMHexEditor({ hex, gameId, onRefresh }) {
   const [form, setForm] = useState({
-    terrain:              hex.terrain ?? 'plains',
-    has_settlement:       hex.has_settlement ?? false,
-    settlement_size:      hex.settlement_size ?? 0,
-    has_light_vegetation: hex.has_light_vegetation ?? false,
-    has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
-    has_railroad:         hex.has_railroad ?? false,
+    terrain:         hex.terrain ?? 'plains',
+    has_settlement:  hex.has_settlement ?? false,
+    settlement_size: hex.settlement_size ?? 0,
+    vegetation_hp:   hex.vegetation_hp ?? 0,
+    has_railroad:    hex.has_railroad ?? false,
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -1039,12 +1324,11 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
   // Reset form when selected hex changes
   useEffect(() => {
     setForm({
-      terrain:              hex.terrain ?? 'plains',
-      has_settlement:       hex.has_settlement ?? false,
-      settlement_size:      hex.settlement_size ?? 0,
-      has_light_vegetation: hex.has_light_vegetation ?? false,
-      has_heavy_vegetation: hex.has_heavy_vegetation ?? false,
-      has_railroad:         hex.has_railroad ?? false,
+      terrain:         hex.terrain ?? 'plains',
+      has_settlement:  hex.has_settlement ?? false,
+      settlement_size: hex.settlement_size ?? 0,
+      vegetation_hp:   hex.vegetation_hp ?? 0,
+      has_railroad:    hex.has_railroad ?? false,
     });
     setMsg('');
   }, [hex.hex_q, hex.hex_r]);
@@ -1080,16 +1364,25 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
       </div>
 
       {[
-        ['has_settlement',       'Settlement'],
-        ['has_light_vegetation', 'Light vegetation'],
-        ['has_heavy_vegetation', 'Heavy vegetation'],
-        ['has_railroad',         'Railroad'],
+        ['has_settlement', 'Settlement'],
+        ['has_railroad',   'Railroad'],
       ].map(([key, label]) => (
         <div key={key} style={rowStyle}>
           <input type="checkbox" checked={form[key]} onChange={chk(key)} id={key} />
           <label htmlFor={key} style={lbl}>{label}</label>
         </div>
       ))}
+
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+          <span style={lbl}>Vegetation HP</span>
+          <span style={{ fontSize: 11, color: form.vegetation_hp >= 11 ? '#22c55e' : form.vegetation_hp >= 1 ? '#86efac' : '#475569' }}>
+            {form.vegetation_hp >= 11 ? 'Heavy' : form.vegetation_hp >= 1 ? 'Light' : 'None'}
+          </span>
+        </div>
+        <input type="number" min={0} max={25} style={iStyle} value={form.vegetation_hp} onChange={inp('vegetation_hp')} />
+        <div style={{ color: '#475569', fontSize: 10, marginTop: 2 }}>0 = none · 1–10 = light · 11+ = heavy</div>
+      </div>
 
       {form.has_settlement && (
         <div style={{ marginBottom: 8 }}>
@@ -1151,6 +1444,7 @@ function OrderPanel({
   onEnterSplitMode,
   onCancelSplit,
   onSplitQtyChange,
+  onConfirmSplitHere,
 }) {
   const [pendingBuildType, setPendingBuildType] = useState('');
 
@@ -1191,6 +1485,7 @@ function OrderPanel({
           </span>
         </div>
         {unit.standing_order && <Tag label={unit.standing_order} color="#6366f1" />}
+        {unit.fortification_level === 1 && <Tag label="Fortified +1 def" color="#f59e0b" />}
       </div>
 
       {/* Queued orders display */}
@@ -1212,11 +1507,11 @@ function OrderPanel({
         </p>
       )}
 
-      {/* Split mode — choose how many units to split off, then enter move mode */}
+      {/* Split mode — choose how many units to split off */}
       {splitMode && !moveMode && (
         <div>
           <p style={{ color: '#fbbf24', fontSize: 11, marginBottom: 8 }}>
-            Split off units: enter count, then plot their move path.
+            Split off how many units?
           </p>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
             <span style={{ color: '#94a3b8', fontSize: 12 }}>Units to split:</span>
@@ -1228,9 +1523,14 @@ function OrderPanel({
             />
             <span style={{ color: '#64748b', fontSize: 11 }}>of {unit.quantity}</span>
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button style={{ ...BTN.base, ...BTN.move }} onClick={onEnterMoveMode} title="Plot the move path for the split-off group">
-              Move Split Group…
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button style={{ ...BTN.base, ...BTN.confirm }} onClick={onConfirmSplitHere}
+              title="Create a new idle stack in this hex — command each group separately">
+              Split Here
+            </button>
+            <button style={{ ...BTN.base, ...BTN.move }} onClick={onEnterMoveMode}
+              title="Split off the group and immediately plot a move path for them">
+              Split &amp; Move…
             </button>
             <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelSplit}>Cancel</button>
           </div>
@@ -1372,18 +1672,19 @@ function OrderPanel({
                   Bombard
                 </button>
               )}
-              {!isSupply && (
+              {/* Patrol button hidden — not yet functional (TODO: implement patrol intercept logic) */}
+              {(unit.stealth_rating ?? 0) > 0 && (
                 <button
                   style={{
                     ...BTN.base,
-                    background: unit.standing_order === 'patrol' ? '#312e81' : '#1e293b',
-                    color: unit.standing_order === 'patrol' ? '#a5b4fc' : '#94a3b8',
-                    border: unit.standing_order === 'patrol' ? '1px solid #6366f1' : '1px solid #374151',
+                    background: unit.standing_order === 'safety' ? '#064e3b' : '#1e293b',
+                    color: unit.standing_order === 'safety' ? '#6ee7b7' : '#94a3b8',
+                    border: unit.standing_order === 'safety' ? '1px solid #10b981' : '1px solid #374151',
                   }}
-                  title="Patrol: Unit intercepts enemies entering its zone each turn. Radius 1 (foot) or 2 (mechanized). Air units use flight group patrol. Persists until cancelled."
-                  onClick={() => onSetPatrol(unit.standing_order === 'patrol' ? null : 'patrol')}
+                  title="Safety: Unit will not fire on undetected enemies and will not reveal its position. Only fires back if the enemy detects it first. Persists until cancelled."
+                  onClick={() => onSetPatrol(unit.standing_order === 'safety' ? null : 'safety')}
                 >
-                  {unit.standing_order === 'patrol' ? 'Patrolling ✓' : 'Patrol'}
+                  {unit.standing_order === 'safety' ? 'Safety ON ✓' : 'Safety'}
                 </button>
               )}
 

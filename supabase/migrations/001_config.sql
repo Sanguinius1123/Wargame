@@ -1,33 +1,22 @@
 -- =============================================================
--- 001_config.sql — Terrain type config + GM helper function
--- All movement costs stored in ×3 scale (user value × 3) so that
--- the 2/3 road multiplier resolves to clean integers.
--- road_cost = terrain_cost × 2 in ×3 scale (= user value × 2)
--- NULL cost = impassable (without road where noted)
+-- 001_config.sql — Terrain type configuration
+-- Direct movement cost scale (1 = 1 hex per move point).
+-- mech_cost NULL = mechanized impassable. naval_cost NULL = no naval access.
 -- =============================================================
 
 CREATE TABLE terrain_type_config (
-  name           TEXT     PRIMARY KEY,
-  elevation      SMALLINT NOT NULL DEFAULT 0,    -- 0=flat, 1=hills, 2=mountains
-  combat_mod     SMALLINT NOT NULL DEFAULT 0,    -- attack bonus for units fighting FROM this terrain
-  blocks_los     BOOLEAN  NOT NULL DEFAULT FALSE,
-  foot_cost      SMALLINT,                       -- NULL = impassable to foot (never happens per design)
-  mech_cost      SMALLINT,                       -- NULL = impassable to mechanized without road
-  naval_cost     SMALLINT,                       -- NULL = impassable to naval
-  foot_road_cost SMALLINT,                       -- road cost for foot; NULL = road doesn't help
-  mech_road_cost SMALLINT                        -- road cost for mechanized; NULL = road doesn't help
+  name          TEXT     PRIMARY KEY,
+  elevation     SMALLINT NOT NULL DEFAULT 0,    -- 0=flat, 1=hills, 2=mountains
+  defense_bonus SMALLINT NOT NULL DEFAULT 0,    -- additive save bonus for defenders
+  foot_cost     SMALLINT,                       -- movement cost for foot units
+  mech_cost     SMALLINT,                       -- movement cost for mechanized (NULL = impassable)
+  naval_cost    SMALLINT                        -- movement cost for naval (NULL = impassable)
 );
 
--- All costs in ×3 scale. User-facing values: plains=1, hills=2, mountains=4, desert=2(mech=1), wetlands=2(mech=4), water=1(naval)
--- Road cost = terrain_cost × 2 in ×3 scale
-INSERT INTO terrain_type_config
-  (name,        elevation, combat_mod, blocks_los, foot_cost, mech_cost, naval_cost, foot_road_cost, mech_road_cost)
-VALUES
-  ('plains',    0,         0,          FALSE,      3,         3,         NULL,       2,              2),
-  ('hills',     1,         1,          FALSE,      6,         6,         NULL,       4,              4),
-  ('mountains', 2,         2,          TRUE,       12,        NULL,      NULL,       8,              8),
-  ('desert',    0,         0,          FALSE,      6,         3,         NULL,       4,              2),
-  ('wetlands',  0,         -1,         FALSE,      6,         12,        NULL,       4,              8),
-  ('water',     0,         0,          FALSE,      NULL,      NULL,      3,          NULL,           NULL);
-
--- is_gm_in_game is defined in 002_auth.sql (after game_participants is created)
+INSERT INTO terrain_type_config (name, elevation, defense_bonus, foot_cost, mech_cost, naval_cost) VALUES
+  ('plains',    0, 0,  1, 1,    NULL),
+  ('hills',     1, 1,  1, 2,    NULL),
+  ('mountains', 2, 2,  1, NULL, NULL),
+  ('desert',    0, 0,  1, 1,    NULL),
+  ('wetlands',  0, 1,  1, NULL, NULL),
+  ('water',     0, 0,  NULL, NULL, 1);

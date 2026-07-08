@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import ConfigureGameModal from '../components/ConfigureGameModal';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 
@@ -31,6 +32,7 @@ export default function GameList() {
   const [newName, setNewName]   = useState('');
   const [selectedMapId, setSelectedMapId]         = useState('');
   const [selectedSettingId, setSelectedSettingId] = useState('');
+  const [configuringGame, setConfiguringGame]     = useState(null);
   const nav = useNavigate();
 
   async function load() {
@@ -145,11 +147,22 @@ export default function GameList() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={s.btn} onClick={() => nav(`/game/${g.id}`)}>Play</button>
             {profile?.global_role === 'gm' && (
-              <button style={{ ...s.btn, background: '#7c3aed' }} onClick={() => nav(`/game/${g.id}/gm`)}>GM</button>
+              <>
+                <button style={{ ...s.btn, background: '#7c3aed' }} onClick={() => nav(`/game/${g.id}/gm`)}>GM</button>
+                <button style={{ ...s.btn, background: '#0f766e' }} onClick={() => setConfiguringGame(g)}>Configure</button>
+              </>
             )}
           </div>
         </div>
       ))}
+
+      {configuringGame && (
+        <ConfigureGameModal
+          game={configuringGame}
+          onClose={() => setConfiguringGame(null)}
+          onSaved={() => { load(); setConfiguringGame(null); }}
+        />
+      )}
     </div>
   );
 }

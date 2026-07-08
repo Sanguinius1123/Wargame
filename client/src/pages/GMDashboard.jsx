@@ -77,13 +77,13 @@ export default function GMDashboard() {
 
   async function addFaction(e) {
     e.preventDefault();
-    if (!addForm.profileId) return setMsg('Select a user.');
+    if (!addForm.name.trim()) return setMsg('Enter a faction name.');
     const h = await headers();
     const r = await fetch(`${SERVER}/api/games/${gameId}/factions`, {
       method: 'POST', headers: h,
-      body: JSON.stringify({ profile_id: addForm.profileId, name: addForm.name, color: addForm.color }),
+      body: JSON.stringify({ name: addForm.name, color: addForm.color }),
     });
-    if (r.ok) { setMsg('Faction added.'); setAddForm(f => ({ ...f, profileId: '', name: '' })); load(); }
+    if (r.ok) { setMsg('Faction added.'); setAddForm(f => ({ ...f, name: '' })); load(); }
     else { const d = await r.json(); setMsg(d.error); }
   }
 
@@ -246,12 +246,15 @@ export default function GMDashboard() {
             {factions.map(f => (
               <div key={f.id} style={s.factionRow}>
                 <div style={s.dot(f.color)} />
-                <span style={{ color: '#e2e8f0', fontSize: 13 }}>{f.name}</span>
-                <span style={{ color: '#64748b', fontSize: 11 }}>({f.profiles?.username})</span>
-                <span style={{ color: '#fbbf24', fontSize: 11 }}>Mat:{f.materials} Man:{f.manpower}</span>
+                <span style={{ color: '#e2e8f0', fontSize: 13, flex: 1 }}>{f.name}</span>
+                {f.profiles?.username
+                  ? <span style={{ color: '#22c55e', fontSize: 11 }}>{f.profiles.username}</span>
+                  : <span style={{ color: '#64748b', fontSize: 11, fontStyle: 'italic' }}>unassigned</span>
+                }
+                <span style={{ color: '#fbbf24', fontSize: 11, marginLeft: 4 }}>M:{f.materials} P:{f.manpower}</span>
                 <button
-                  style={{ background: 'none', border: '1px solid #334155', borderRadius: 3, padding: '2px 7px', color: '#94a3b8', fontSize: 11, cursor: 'pointer', marginLeft: 'auto' }}
-                  title={`View the game as ${f.name} — see their FOW, give orders on their behalf`}
+                  style={{ background: 'none', border: '1px solid #334155', borderRadius: 3, padding: '2px 7px', color: '#94a3b8', fontSize: 11, cursor: 'pointer', marginLeft: 4 }}
+                  title={`View the game as ${f.name}`}
                   onClick={() => nav(`/game/${gameId}?viewAs=${f.id}`)}
                 >
                   View as
@@ -259,14 +262,8 @@ export default function GMDashboard() {
               </div>
             ))}
             <form onSubmit={addFaction} style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
-              <div style={s.label}>Add faction — select player</div>
-              <select style={s.input} value={addForm.profileId} onChange={e => setAddForm(f => ({ ...f, profileId: e.target.value }))}>
-                <option value="">— choose user —</option>
-                {allProfiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.username}</option>
-                ))}
-              </select>
-              <input style={s.input} placeholder="Faction name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
+              <div style={s.label}>Add faction slot</div>
+              <input style={s.input} placeholder="Faction name (e.g. Allies)" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ ...s.label, marginBottom: 0 }}>Color</label>
                 <input type="color" value={addForm.color} onChange={e => setAddForm(f => ({ ...f, color: e.target.value }))} />

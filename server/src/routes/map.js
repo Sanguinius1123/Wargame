@@ -16,10 +16,10 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
   try {
     [hexes, units, buildings, resourceTiles] = await Promise.all([
       fetchAll(() => adminDb.from('hexes')
-        .select('id, hex_q, hex_r, terrain, owner_faction_id, has_light_vegetation, has_heavy_vegetation, has_settlement, settlement_name, settlement_size, has_railroad')
+        .select('id, hex_q, hex_r, terrain, owner_faction_id, vegetation_hp, has_light_vegetation, has_heavy_vegetation, has_urban, has_settlement, settlement_name, settlement_size, has_airstrip, has_railroad')
         .eq('game_id', gameId)),
       fetchAll(() => adminDb.from('units')
-        .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, bombard_to_hit, bombard_range)')
+        .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, move, bombard_to_hit, bombard_range, stealth_rating)')
         .eq('game_id', gameId)),
       fetchAll(() => adminDb.from('buildings')
         .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
@@ -40,8 +40,10 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
       id: u.id,
       type: u.unit_type_config?.name,
       tags: u.unit_type_config?.tags ?? [],
+      move: u.unit_type_config?.move ?? 9,
       bombard_to_hit: u.unit_type_config?.bombard_to_hit ?? null,
       bombard_range:  u.unit_type_config?.bombard_range  ?? null,
+      stealth_rating: u.unit_type_config?.stealth_rating ?? 0,
       quantity: u.quantity,
       hp: u.hp,
       standing_order: u.standing_order,
@@ -109,7 +111,9 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
       return { ...h, units: sanitizedUnits, buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
     }
     if (scouted.has(k)) {
-      return { hex_q: h.hex_q, hex_r: h.hex_r, terrain: h.terrain, visibility: 'scouted', units: [], buildings: [] };
+      // Return static hex attributes as stale info (settlement, railroad, vegetation, etc.)
+      // No units (they move); buildings shown as last-known state.
+      return { ...h, units: [], buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'scouted' };
     }
     return { hex_q: h.hex_q, hex_r: h.hex_r, visibility: 'dark', units: [], buildings: [] };
   }));
@@ -133,7 +137,7 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
 
   const { data: units } = await adminDb
     .from('units')
-    .select('id, quantity, hp, standing_order, fortification_level, faction_id, factions(name, color), unit_type_config(name, tags, to_hit, defense, penetration, atk_range, move, los, bombard_range, bombard_to_hit, overwatch_to_hit, overwatch_range)')
+    .select('id, quantity, hp, standing_order, fortification_level, faction_id, factions(name, color), unit_type_config(name, tags, to_hit, defense, penetration, atk_range, move, los, bombard_range, bombard_to_hit, overwatch_to_hit, overwatch_range, stealth_rating)')
     .eq('game_id', gameId)
     .eq('hex_q', q)
     .eq('hex_r', r);
@@ -167,15 +171,23 @@ router.patch('/:gameId/hexes/:q/:r', requireGM, async (req, res) => {
   const { gameId, q, r } = req.params;
   const {
     terrain, owner_faction_id,
-    has_light_vegetation, has_heavy_vegetation,
+    vegetation_hp, has_light_vegetation, has_heavy_vegetation,
     has_settlement, settlement_size, has_railroad,
   } = req.body;
 
   const updates = {};
   if (terrain !== undefined) updates.terrain = terrain;
   if (owner_faction_id !== undefined) updates.owner_faction_id = owner_faction_id;
-  if (has_light_vegetation !== undefined) updates.has_light_vegetation = has_light_vegetation;
-  if (has_heavy_vegetation !== undefined) updates.has_heavy_vegetation = has_heavy_vegetation;
+  if (vegetation_hp !== undefined) {
+    const hp = Math.max(0, Number(vegetation_hp));
+    updates.vegetation_hp        = hp;
+    updates.has_heavy_vegetation = hp >= 11;
+    updates.has_light_vegetation = hp >= 1 && hp <= 10;
+  } else {
+    // Legacy boolean path — keep for backward compat (e.g. direct API calls)
+    if (has_light_vegetation !== undefined) updates.has_light_vegetation = has_light_vegetation;
+    if (has_heavy_vegetation !== undefined) updates.has_heavy_vegetation = has_heavy_vegetation;
+  }
   if (has_settlement !== undefined) updates.has_settlement = has_settlement;
   if (settlement_size !== undefined) updates.settlement_size = settlement_size;
   if (has_railroad !== undefined) updates.has_railroad = has_railroad;
@@ -256,6 +268,12 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   // Clear existing orders for the target unit this turn
   await adminDb.from('movement_orders').delete().eq('unit_id', targetUnitId).eq('turn', turn);
 
+  // Skip order insertion for a pure split-in-place (no path, no destination hex given)
+  const hasOrderPayload = (Array.isArray(path) && path.length > 0) || to_hex_q != null || to_hex_r != null;
+  if (!hasOrderPayload) {
+    return res.json({ orders: [], split_unit_id: split_quantity != null ? targetUnitId : null });
+  }
+
   // Build order rows — path[] for multi-step moves, single row otherwise
   const steps = Array.isArray(path) && path.length > 0
     ? path.map((step, i) => ({ unit_id: targetUnitId, game_id: gameId, order_type: 'move', sequence: i, to_hex_q: step.q, to_hex_r: step.r, turn }))
@@ -323,6 +341,7 @@ router.post('/:gameId/production', requireAuth, async (req, res) => {
   const { data, error } = await adminDb.from('production_queue').insert({
     game_id: gameId, faction_id: faction.id, unit_type_id: unitType.id,
     factory_hex_q, factory_hex_r, quantity, created_turn: game.current_turn,
+    status: 'pending',
   }).select().single();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -539,10 +558,11 @@ router.get('/:gameId/ordered-units', requireAuth, async (req, res) => {
   const { gameId } = req.params;
   const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
   if (!game) return res.status(404).json({ error: 'Game not found' });
-  const [{ data: orders }, { data: fgUnits }] = await Promise.all([
+  const [{ data: orders }, { data: fgRows }] = await Promise.all([
     adminDb.from('movement_orders').select('unit_id').eq('game_id', gameId).eq('turn', game.current_turn),
-    adminDb.from('flight_group_units').select('unit_id').eq('game_id', gameId),
+    adminDb.from('flight_groups').select('flight_group_units(unit_id)').eq('game_id', gameId).eq('turn', game.current_turn),
   ]);
+  const fgUnits = (fgRows ?? []).flatMap(fg => fg.flight_group_units ?? []);
   const unitIds = [...new Set([
     ...(orders ?? []).map(o => o.unit_id),
     ...(fgUnits ?? []).map(u => u.unit_id),
@@ -589,7 +609,7 @@ router.patch('/:gameId/units/:unitId/standing-order', requireAuth, async (req, r
   const { standing_order } = req.body;
   const isGM = req.user.global_role === 'gm';
 
-  const validValues = [null, 'patrol'];
+  const validValues = [null, 'patrol', 'safety'];
   if (!validValues.includes(standing_order)) {
     return res.status(400).json({ error: `Invalid standing_order value: ${standing_order}` });
   }

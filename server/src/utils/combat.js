@@ -114,6 +114,16 @@ export function defenseBonus(unit, hex, hasFortificationBuilding = false) {
 }
 
 // ---------------------------------------------------------------------------
+// detectionCheck — roll-under 2d6. Returns true if detected.
+// ---------------------------------------------------------------------------
+function detectionCheck(detRating, stealthRating, distance) {
+  const score = 7 + detRating - stealthRating - distance;
+  if (score > 12) return true;
+  if (score < 2) return false;
+  return roll2d6() <= score;
+}
+
+// ---------------------------------------------------------------------------
 // resolveHexCombat
 //
 // Resolve one round of simultaneous close combat in a contested hex.
@@ -282,7 +292,7 @@ export async function executeGroundCombat(db, gameId, turn) {
   let allUnits;
   try {
     allUnits = await fetchAll(() => db.from('units')
-      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
+      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level, standing_order, unit_type_config(tags, stealth_rating, detection_rating)')
       .eq('game_id', gameId));
   } catch (e) {
     return {
@@ -303,11 +313,62 @@ export async function executeGroundCombat(db, gameId, turn) {
   const hexMap = new Map();
 
   for (const unit of allUnits) {
+    // Naval units fight in Phase 2 only — exclude from Phase 3 ground combat.
+    if (unit.unit_type_config?.tags?.includes('naval')) continue;
     const key = `${unit.hex_q},${unit.hex_r}`;
     if (!hexMap.has(key)) hexMap.set(key, new Map());
     const factions = hexMap.get(key);
     if (!factions.has(unit.faction_id)) factions.set(unit.faction_id, []);
     factions.get(unit.faction_id).push(unit);
+  }
+
+  // -----------------------------------------------------------------------
+  // 2b. Stealth-safety filter.
+  //     Units with standing_order='safety' and stealth_rating>0 are only
+  //     visible to enemies that pass a detection roll. Undetected safety
+  //     units are removed from their faction group — they don't fight this
+  //     hex and their presence doesn't make the hex contested.
+  //     Detection uses distance=0 (same hex) in the formula.
+  // -----------------------------------------------------------------------
+  for (const [, factions] of hexMap) {
+    if (factions.size < 2) continue;
+
+    for (const [factionId, units] of factions) {
+      const undetected = [];
+
+      for (const unit of units) {
+        const utc = unit.unit_type_config;
+        const stealthRating = utc?.stealth_rating ?? 0;
+        if (stealthRating === 0) continue;                      // not stealthy
+        if (unit.standing_order !== 'safety') continue;        // safety not active
+
+        // Check if ANY enemy unit in this hex detects this unit.
+        let anyEnemyDetects = false;
+        for (const [eFactionId, eUnits] of factions) {
+          if (eFactionId === factionId) continue;
+          for (const eu of eUnits) {
+            const eutc = eu.unit_type_config;
+            if (detectionCheck(eutc?.detection_rating ?? 0, stealthRating, 0)) {
+              anyEnemyDetects = true;
+              break;
+            }
+          }
+          if (anyEnemyDetects) break;
+        }
+
+        if (!anyEnemyDetects) undetected.push(unit.id);
+      }
+
+      // Remove undetected units from the combat group.
+      if (undetected.length > 0) {
+        const remaining = units.filter(u => !undetected.includes(u.id));
+        if (remaining.length === 0) {
+          factions.delete(factionId);
+        } else {
+          factions.set(factionId, remaining);
+        }
+      }
+    }
   }
 
   // Filter to contested hexes only.
@@ -330,7 +391,7 @@ export async function executeGroundCombat(db, gameId, turn) {
 
   const { data: unitTypeRows, error: utcError } = await db
     .from('unit_type_config')
-    .select('id, name, to_hit, defense, penetration, tags')
+    .select('id, name, to_hit, defense, penetration, tags, stealth_rating, detection_rating')
     .eq('game_id', gameId)
     .in('id', unitTypeIds);
 
@@ -469,83 +530,7 @@ export async function executeGroundCombat(db, gameId, turn) {
   }
 
   // -----------------------------------------------------------------------
-  // 7. Artillery auto-destroy pass.
-  //    After casualties: reload all remaining units, find any non-firing unit
-  //    (to_hit IS NULL) that is in a hex with enemy units → delete it.
-  // -----------------------------------------------------------------------
-  const { data: survivingUnits, error: survivingError } = await db
-    .from('units')
-    .select('id, faction_id, unit_type_id, hex_q, hex_r')
-    .eq('game_id', gameId);
-
-  if (survivingError) {
-    errors.push(`Artillery auto-destroy: failed to reload units — ${survivingError.message}`);
-  } else {
-    // Re-build hex → factions map from surviving units.
-    const survivingHexMap = new Map();
-    for (const unit of survivingUnits ?? []) {
-      const key = `${unit.hex_q},${unit.hex_r}`;
-      if (!survivingHexMap.has(key)) survivingHexMap.set(key, []);
-      survivingHexMap.get(key).push(unit);
-    }
-
-    for (const [, hexUnits] of survivingHexMap) {
-      // Check if hex is still contested after casualties.
-      const factionsPresent = new Set(hexUnits.map((u) => u.faction_id));
-      if (factionsPresent.size < 2) continue;
-
-      // Find non-firing units (to_hit IS NULL).
-      for (const unit of hexUnits) {
-        const cfg = unitTypeById.get(unit.unit_type_id);
-        if (!cfg || cfg.to_hit != null) continue; // skip firing units
-
-        // This non-firing unit is alone with enemies — check if its faction
-        // has any other unit in the hex.
-        const sameFactionsUnit = hexUnits.find(
-          (u) => u.id !== unit.id && u.faction_id === unit.faction_id
-        );
-
-        // "Alone vs enemies" means no friendly FIRING unit shares the hex.
-        // The rule says auto-destroyed if alone vs enemies (to_hit = NULL, cannot fight back).
-        // We interpret "alone" as: the only unit from its faction, or all surviving
-        // friendly units also lack to_hit (no one can fight back regardless).
-        const friendlyFiringUnit = hexUnits.find((u) => {
-          if (u.faction_id !== unit.faction_id) return false;
-          if (u.id === unit.id) return false;
-          const uCfg = unitTypeById.get(u.unit_type_id);
-          return uCfg && uCfg.to_hit != null;
-        });
-
-        if (!friendlyFiringUnit) {
-          // No friendly unit with to_hit exists — this unit is auto-destroyed.
-          const { error } = await db.from('units').delete().eq('id', unit.id);
-          if (error) {
-            errors.push(`Artillery auto-destroy: failed to delete unit ${unit.id} — ${error.message}`);
-          } else {
-            combatLogInserts.push({
-              game_id: gameId,
-              turn,
-              phase: 3,
-              hex_q: unit.hex_q,
-              hex_r: unit.hex_r,
-              log_type: 'combat',
-              faction_id: unit.faction_id,
-              data: {
-                event: 'auto_destroy',
-                unit_id: unit.id,
-                unit_type_id: unit.unit_type_id,
-                reason: 'Non-firing unit left alone against enemies (no friendly unit with to_hit).',
-              },
-            });
-            totalCasualties += 1;
-          }
-        }
-      }
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // 8. Insert combat log rows.
+  // 7. Insert combat log rows.
   // -----------------------------------------------------------------------
   if (combatLogInserts.length > 0) {
     const { error: logError } = await db.from('combat_log').insert(combatLogInserts);
@@ -555,7 +540,7 @@ export async function executeGroundCombat(db, gameId, turn) {
   }
 
   // -----------------------------------------------------------------------
-  // 9. Return summary.
+  // 8. Return summary.
   // -----------------------------------------------------------------------
   return { hexesFought, totalCasualties, errors };
 }

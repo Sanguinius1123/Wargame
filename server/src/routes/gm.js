@@ -5,6 +5,58 @@ import { resolveTurn } from '../utils/resolveTurn.js';
 
 const router = Router();
 
+// GET /api/gm/players — list all registered player profiles for faction assignment
+router.get('/players', requireGM, async (req, res) => {
+  const { data, error } = await adminDb
+    .from('profiles')
+    .select('id, username, global_role')
+    .order('username');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data ?? []);
+});
+
+// PATCH /api/gm/:gameId/factions/:factionId — update faction (assign player, rename, recolor)
+router.patch('/:gameId/factions/:factionId', requireGM, async (req, res) => {
+  const { gameId, factionId } = req.params;
+  const { profile_id, name, color } = req.body;
+
+  // Read current profile_id before update so we can sync participants
+  const { data: current } = await adminDb
+    .from('factions').select('id, profile_id').eq('id', factionId).single();
+
+  const updates = {};
+  if (profile_id !== undefined) updates.profile_id = profile_id || null;
+  if (name     !== undefined) updates.name     = name;
+  if (color    !== undefined) updates.color    = color;
+
+  const { data: faction, error } = await adminDb
+    .from('factions').update(updates).eq('id', factionId).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Sync game_participants when player assignment changes
+  const oldId = current?.profile_id;
+  const newId = updates.profile_id;
+  if (profile_id !== undefined && oldId !== newId) {
+    if (newId) {
+      await adminDb.from('game_participants').upsert(
+        { game_id: gameId, profile_id: newId, role: 'player' },
+        { onConflict: 'game_id,profile_id' }
+      );
+    }
+    if (oldId) {
+      // Remove from participants only if they have no other factions in this game
+      const { data: others } = await adminDb.from('factions')
+        .select('id').eq('game_id', gameId).eq('profile_id', oldId);
+      if (!others?.length) {
+        await adminDb.from('game_participants')
+          .delete().eq('game_id', gameId).eq('profile_id', oldId).eq('role', 'player');
+      }
+    }
+  }
+
+  res.json(faction);
+});
+
 // POST /api/gm/:gameId/units — place or add to a unit stack on the map
 // If a stack of the same faction+type already exists at that hex, quantity is added to it.
 router.post('/:gameId/units', requireGM, async (req, res) => {
@@ -130,7 +182,7 @@ router.patch('/:gameId/settings', requireGM, async (req, res) => {
 
 const BUILDING_MAX_HP = {
   factory: 20, airbase: 10, harbor: 10,
-  airstrip: 4, fortification: 4,
+  airstrip: 4, fortification: 12,
 };
 
 // POST /api/gm/:gameId/buildings — place a building (full HP by default = operational)
@@ -229,65 +281,136 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
   }
 });
 
-// POST /api/gm/:gameId/save-as-map — snapshot current game hexes as a reusable map template
+// POST /api/gm/:gameId/save-as-map — snapshot current game (hexes, factions, units)
 router.post('/:gameId/save-as-map', requireGM, async (req, res) => {
   const { gameId } = req.params;
   const { name, description } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'name required' });
 
-  let hexes;
+  let hexes, factions, units;
   try {
-    hexes = await fetchAll(() => adminDb.from('hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
-      .eq('game_id', gameId));
+    [hexes, factions, units] = await Promise.all([
+      fetchAll(() => adminDb.from('hexes')
+        .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, vegetation_hp, has_railroad')
+        .eq('game_id', gameId)),
+      adminDb.from('factions').select('id, name, color').eq('game_id', gameId)
+        .then(r => { if (r.error) throw new Error(r.error.message); return r.data ?? []; }),
+      fetchAll(() => adminDb.from('units')
+        .select('faction_id, hex_q, hex_r, quantity, unit_type_config(name)')
+        .eq('game_id', gameId)),
+    ]);
   } catch (e) { return res.status(500).json({ error: e.message }); }
+
   if (!hexes.length) return res.status(400).json({ error: 'Game has no hexes to save' });
 
   const { data: map, error: mapErr } = await adminDb
     .from('maps')
     .insert({ name: name.trim(), description: description?.trim() ?? null, created_by: req.user.id })
-    .select()
-    .single();
+    .select().single();
   if (mapErr) return res.status(500).json({ error: mapErr.message });
 
-  const { error: insertErr } = await adminDb
-    .from('map_hexes')
-    .insert(hexes.map(h => ({ map_id: map.id, ...h })));
-  if (insertErr) {
+  try {
+    await adminDb.from('map_hexes')
+      .insert(hexes.map(h => ({ map_id: map.id, ...h })));
+
+    if (factions.length) {
+      await adminDb.from('map_factions')
+        .insert(factions.map((f, i) => ({ map_id: map.id, name: f.name, color: f.color, slot: i })));
+    }
+
+    const factionNameById = Object.fromEntries(factions.map(f => [f.id, f.name]));
+    const unitRows = units
+      .filter(u => factionNameById[u.faction_id] && u.unit_type_config?.name)
+      .map(u => ({
+        map_id: map.id,
+        faction_name: factionNameById[u.faction_id],
+        hex_q: u.hex_q, hex_r: u.hex_r,
+        unit_type_name: u.unit_type_config.name,
+        quantity: u.quantity,
+      }));
+    if (unitRows.length) {
+      await adminDb.from('map_units').insert(unitRows);
+    }
+  } catch (e) {
     await adminDb.from('maps').delete().eq('id', map.id);
-    return res.status(500).json({ error: insertErr.message });
+    return res.status(500).json({ error: e.message });
   }
 
-  res.json({ id: map.id, name: map.name, hex_count: hexes.length });
+  res.json({ id: map.id, name: map.name, hex_count: hexes.length, faction_count: factions.length, unit_count: units.length });
 });
 
-// POST /api/gm/:gameId/load-map/:mapId — overwrite game hexes from a saved map template
-// Also clears all units, buildings, orders, and scouted hexes for a clean slate.
+// POST /api/gm/:gameId/load-map/:mapId — full reset: overwrites hexes, factions, and units.
+// Clears all existing game state. Player assignments are lost and must be reassigned.
 router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
   const { gameId, mapId } = req.params;
 
-  let mapHexes;
+  let mapHexes, mapFactions, mapUnits;
   try {
-    mapHexes = await fetchAll(() => adminDb.from('map_hexes')
-      .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, has_railroad')
-      .eq('map_id', mapId));
+    [mapHexes, mapFactions, mapUnits] = await Promise.all([
+      fetchAll(() => adminDb.from('map_hexes')
+        .select('hex_q, hex_r, terrain, has_settlement, settlement_name, settlement_size, has_light_vegetation, has_heavy_vegetation, vegetation_hp, has_railroad')
+        .eq('map_id', mapId)),
+      adminDb.from('map_factions').select('name, color, slot').eq('map_id', mapId).order('slot')
+        .then(r => r.data ?? []),
+      adminDb.from('map_units').select('faction_name, hex_q, hex_r, unit_type_name, quantity')
+        .eq('map_id', mapId).then(r => r.data ?? []),
+    ]);
   } catch (e) { return res.status(500).json({ error: e.message }); }
   if (!mapHexes.length) return res.status(404).json({ error: 'Map not found or empty' });
 
-  // Wipe existing game state (cascades are not enough because faction data should survive)
+  // Wipe all existing game state including factions and their player assignments
   await adminDb.from('units').delete().eq('game_id', gameId);
   await adminDb.from('movement_orders').delete().eq('game_id', gameId);
   await adminDb.from('buildings').delete().eq('game_id', gameId);
   await adminDb.from('production_queue').delete().eq('game_id', gameId);
   await adminDb.from('scouted_hexes').delete().eq('game_id', gameId);
   await adminDb.from('hexes').delete().eq('game_id', gameId);
+  // Remove player participants (GM stays); delete factions so they're rebuilt from map
+  const { data: playerParticipants } = await adminDb.from('factions')
+    .select('profile_id').eq('game_id', gameId).not('profile_id', 'is', null);
+  await adminDb.from('factions').delete().eq('game_id', gameId);
+  for (const p of playerParticipants ?? []) {
+    await adminDb.from('game_participants')
+      .delete().eq('game_id', gameId).eq('profile_id', p.profile_id).eq('role', 'player');
+  }
 
-  const { error: insertErr } = await adminDb
-    .from('hexes')
-    .insert(mapHexes.map(h => ({ game_id: gameId, ...h })));
-  if (insertErr) return res.status(500).json({ error: insertErr.message });
+  // Insert hexes
+  const { error: hexErr } = await adminDb.from('hexes').insert(mapHexes.map(h => ({
+    game_id: gameId, ...h,
+    vegetation_hp: h.vegetation_hp ?? (h.has_heavy_vegetation ? 20 : h.has_light_vegetation ? 8 : null),
+  })));
+  if (hexErr) return res.status(500).json({ error: hexErr.message });
 
-  res.json({ loaded: mapHexes.length });
+  // Create factions from map template (no players assigned yet)
+  const factionMap = {};
+  for (const mf of mapFactions) {
+    const { data: faction } = await adminDb.from('factions')
+      .insert({ game_id: gameId, name: mf.name, color: mf.color, profile_id: null })
+      .select('id, name').single();
+    if (faction) factionMap[faction.name] = faction.id;
+  }
+
+  // Place pre-placed units
+  if (mapUnits.length && Object.keys(factionMap).length) {
+    const { data: unitTypes } = await adminDb.from('unit_type_config')
+      .select('id, name').eq('game_id', gameId);
+    const typeByName = Object.fromEntries((unitTypes ?? []).map(t => [t.name, t.id]));
+
+    const unitRows = mapUnits
+      .filter(u => factionMap[u.faction_name] && typeByName[u.unit_type_name])
+      .map(u => ({
+        game_id: gameId, faction_id: factionMap[u.faction_name],
+        unit_type_id: typeByName[u.unit_type_name],
+        hex_q: u.hex_q, hex_r: u.hex_r, quantity: u.quantity,
+      }));
+    if (unitRows.length) await adminDb.from('units').insert(unitRows);
+  }
+
+  res.json({
+    loaded: mapHexes.length,
+    factions: Object.keys(factionMap).length,
+    units: mapUnits.length,
+  });
 });
 
 // DELETE /api/gm/:gameId — permanently delete a game and all related data

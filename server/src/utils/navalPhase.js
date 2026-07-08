@@ -87,7 +87,7 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
   // ------------------------------------------------------------------
   const { data: allUnitsRaw, error: unitsErr } = await db
     .from('units')
-    .select('id, faction_id, hex_q, hex_r, quantity, hp, unit_type_id, standing_order')
+    .select('id, faction_id, hex_q, hex_r, quantity, hp, unit_type_id, standing_order, fortification_level')
     .eq('game_id', gameId);
 
   if (unitsErr) {
@@ -197,7 +197,11 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
         for (let j = i + 1; j < factions.length; j++) {
           const [, side1] = factions[i];
           const [, side2] = factions[j];
-          const result = navalCombat(side1, side2, hexKey, false);
+          // Submarines fight exclusively via the submarine section below.
+          const s1 = side1.filter(u => (u.cfg?.stealth_rating ?? 0) === 0);
+          const s2 = side2.filter(u => (u.cfg?.stealth_rating ?? 0) === 0);
+          if (!s1.length || !s2.length) continue;
+          const result = navalCombat(s1, s2, hexKey, false);
           engagements.push(result);
           combatLogInserts.push({ game_id: gameId, turn, phase: 2, hex_q: hq, hex_r: hr, log_type: 'naval_combat', faction_id: null, data: result });
         }
@@ -241,16 +245,20 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
           processed.add(uid);
           processed.add(uid2);
 
-          // Border battle: simultaneous ranged fire
-          const result = navalCombat([u1], [u2], `path_crossing:${f1.q},${f1.r}→${t1.q},${t1.r}`, true);
-          engagements.push(result);
-          combatLogInserts.push({
-            game_id: gameId, turn, phase: 2,
-            hex_q: t1.q, hex_r: t1.r,
-            log_type: 'naval_combat',
-            faction_id: null,
-            data: result,
-          });
+          // Border battle: simultaneous ranged fire (submarines excluded).
+          const bc1 = (u1.cfg?.stealth_rating ?? 0) === 0 ? [u1] : [];
+          const bc2 = (u2.cfg?.stealth_rating ?? 0) === 0 ? [u2] : [];
+          if (bc1.length && bc2.length) {
+            const result = navalCombat(bc1, bc2, `path_crossing:${f1.q},${f1.r}→${t1.q},${t1.r}`, true);
+            engagements.push(result);
+            combatLogInserts.push({
+              game_id: gameId, turn, phase: 2,
+              hex_q: t1.q, hex_r: t1.r,
+              log_type: 'naval_combat',
+              faction_id: null,
+              data: result,
+            });
+          }
         }
       }
     }
@@ -291,14 +299,18 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
         stopped.add(u.id);
       }
 
-      // Close combat between all factions — pairwise simultaneous fire
+      // Close combat between all factions — pairwise simultaneous fire.
+      // Submarines are excluded here; they fight exclusively via the submarine section.
       const factions = [...byFaction.entries()];
       for (let i = 0; i < factions.length; i++) {
         for (let j = i + 1; j < factions.length; j++) {
           const [, side1] = factions[i];
           const [, side2] = factions[j];
+          const s1 = side1.filter(u => (u.cfg?.stealth_rating ?? 0) === 0);
+          const s2 = side2.filter(u => (u.cfg?.stealth_rating ?? 0) === 0);
+          if (!s1.length || !s2.length) continue;
           const [hq, hr] = hexKey.split(',').map(Number);
-          const result = navalCombat(side1, side2, hexKey, false);
+          const result = navalCombat(s1, s2, hexKey, false);
           engagements.push(result);
           combatLogInserts.push({
             game_id: gameId, turn, phase: 2,
@@ -313,9 +325,12 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
   }
 
   // ------------------------------------------------------------------
-  // 6. Auto ranged fire — two passes for detection-aware submarine rules
+  // 6. Submarine special combat — one-sided when undetected.
+  // Surface ships fight only in same-hex close combat (no ranged fire step).
+  // Each target ship independently checks whether it can detect the sub.
+  // Undetected: sub fires, target cannot fire back.
   // ------------------------------------------------------------------
-  // Group all naval units by hex
+  // Group all naval units by hex (still needed for sub close-combat check)
   const unitsByHex = new Map();
   for (const u of navalUnits) {
     if (!isAlive(u)) continue;
@@ -324,113 +339,46 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
     unitsByHex.get(k).push(u);
   }
 
-  // Pass 1: surface ships fire normally. When targeting a stealthy unit, run a
-  // detection check first — undetected units cannot be targeted.
-  for (const u of navalUnits) {
-    if (!isAlive(u)) continue;
-    const cfg = u.cfg;
-    if (!cfg?.atk_range || !cfg?.to_hit) continue;
-    // Submarines are handled in Pass 2
-    if ((cfg.stealth_rating ?? 0) > 0) continue;
-
-    const ownKey = `${u.hex_q},${u.hex_r}`;
-    const ownHexUnits = unitsByHex.get(ownKey) ?? [];
-    const ownFactions = new Set(ownHexUnits.map(x => x.faction_id));
-    if (ownFactions.size > 1) continue; // close combat takes priority
-
-    // Only fire at detected enemies
-    const targets = navalUnits.filter(t => {
-      if (!isAlive(t)) return false;
-      if (t.faction_id === u.faction_id) return false;
-      const d = hexDist(u.hex_q, u.hex_r, t.hex_q, t.hex_r);
-      if (d <= 0 || d > cfg.atk_range) return false;
-      const tStealth = t.cfg?.stealth_rating ?? 0;
-      if (tStealth > 0) {
-        // Sonar-based detection check before firing at a stealthy target
-        return detectionCheck(cfg.detection_rating ?? 0, tStealth, d);
-      }
-      return true; // non-stealthy targets are auto-detected within LOS
-    });
-
-    if (!targets.length) continue;
-
-    const weighted = targets.map(t => ({
-      id: t.id,
-      weight: effectiveCount(t) / hexDist(u.hex_q, u.hex_r, t.hex_q, t.hex_r),
-    }));
-    const diceAlloc = distributeDice(effectiveCount(u), weighted);
-
-    const rangeCasualties = new Map();
-    for (const t of targets) {
-      const dice = diceAlloc.get(t.id) ?? 0;
-      for (let d = 0; d < dice; d++) {
-        const { casualty } = rollHit(cfg.to_hit, t.cfg?.defense ?? 6, cfg.penetration ?? 0);
-        if (casualty) rangeCasualties.set(t.id, (rangeCasualties.get(t.id) ?? 0) + 1);
-      }
-    }
-
-    for (const [tid, count] of rangeCasualties) {
-      const t = unitById.get(tid);
-      if (!t) continue;
-      for (let i = 0; i < count; i++) applyCasualty(t);
-    }
-
-    if (rangeCasualties.size > 0) {
-      combatLogInserts.push({
-        game_id: gameId, turn, phase: 2,
-        hex_q: u.hex_q, hex_r: u.hex_r,
-        log_type: 'naval_ranged',
-        faction_id: u.faction_id,
-        data: { firer: u.id, casualties: Object.fromEntries(rangeCasualties) },
-      });
-    }
-  }
-
-  // Pass 2: submarine ranged fire — one-sided combat when undetected.
-  // Each target ship independently checks whether it can detect the sub.
-  // Undetected: sub fires, target cannot fire back. After the sub fires,
-  // the struck target gets a +2 bonus detection roll; success reveals the
-  // sub's hex in scouted_hexes for all nearby enemy factions.
+  // Submarine same-hex special combat — one-sided when undetected.
+  // Subs share a hex with surface ships. Each surface ship independently
+  // checks whether it detects the sub (sonar). Undetected: sub fires, target
+  // cannot fire back. Close combat (step 7) handles all other naval fighting.
   for (const sub of navalUnits) {
     if (!isAlive(sub)) continue;
     const cfg = sub.cfg;
-    if (!cfg?.atk_range || !cfg?.to_hit) continue;
-    if ((cfg.stealth_rating ?? 0) === 0) continue; // only actual subs here
+    if (!cfg?.to_hit) continue;
+    if ((cfg.stealth_rating ?? 0) === 0) continue; // subs only
 
     const ownKey = `${sub.hex_q},${sub.hex_r}`;
     const ownHexUnits = unitsByHex.get(ownKey) ?? [];
-    const ownFactions = new Set(ownHexUnits.map(x => x.faction_id));
-    if (ownFactions.size > 1) continue;
 
-    // For each enemy in range, determine whether it detects the sub.
-    // Sub fires at ALL in-range enemies regardless; detection only affects
-    // whether the target can fire back.
-    const inRange = navalUnits.filter(t => {
-      if (!isAlive(t)) return false;
-      if (t.faction_id === sub.faction_id) return false;
-      const d = hexDist(sub.hex_q, sub.hex_r, t.hex_q, t.hex_r);
-      return d > 0 && d <= cfg.atk_range;
-    });
+    // Only fire at enemies sharing the same hex
+    const inHex = ownHexUnits.filter(t =>
+      isAlive(t) && t.faction_id !== sub.faction_id
+    );
+    if (!inHex.length) continue;
 
-    if (!inRange.length) continue;
-
-    const detectedBySomeTarget = new Set(); // target ids that detect the sub
-    for (const t of inRange) {
-      const d = hexDist(sub.hex_q, sub.hex_r, t.hex_q, t.hex_r);
-      if (detectionCheck(t.cfg?.detection_rating ?? 0, cfg.stealth_rating, d)) {
+    // Detection: distance = 0 for same-hex. Use distance 1 in formula to avoid divide-by-zero.
+    const detectedBySomeTarget = new Set();
+    for (const t of inHex) {
+      if (detectionCheck(t.cfg?.detection_rating ?? 0, cfg.stealth_rating, 1)) {
         detectedBySomeTarget.add(t.id);
       }
     }
 
-    // Sub fires proportionally at all in-range targets
-    const weighted = inRange.map(t => ({
-      id: t.id,
-      weight: effectiveCount(t) / hexDist(sub.hex_q, sub.hex_r, t.hex_q, t.hex_r),
-    }));
+    // Safety mode: only fire at targets that have detected the sub.
+    // Without safety: fire at all in-hex enemies regardless.
+    const subSafety = sub.standing_order === 'safety';
+    const fireTargets = subSafety
+      ? inHex.filter(t => detectedBySomeTarget.has(t.id))
+      : inHex;
+
+    // Sub fires proportionally at eligible targets.
+    const weighted = fireTargets.map(t => ({ id: t.id, weight: effectiveCount(t) }));
     const diceAlloc = distributeDice(effectiveCount(sub), weighted);
 
     const subCasualties = new Map();
-    for (const t of inRange) {
+    for (const t of fireTargets) {
       const dice = diceAlloc.get(t.id) ?? 0;
       for (let d = 0; d < dice; d++) {
         const { casualty } = rollHit(cfg.to_hit, t.cfg?.defense ?? 6, cfg.penetration ?? 0);
@@ -444,16 +392,13 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
       for (let i = 0; i < count; i++) applyCasualty(t);
     }
 
-    // Detected targets fire back at the sub
+    // Detected targets fire back
     const returnCasualties = new Map();
-    for (const t of inRange) {
+    for (const t of inHex) {
       if (!detectedBySomeTarget.has(t.id)) continue;
       if (!isAlive(t)) continue;
       const tCfg = t.cfg;
-      if (!tCfg?.to_hit || !tCfg?.atk_range) continue;
-      const d = hexDist(sub.hex_q, sub.hex_r, t.hex_q, t.hex_r);
-      if (d > tCfg.atk_range) continue;
-
+      if (!tCfg?.to_hit) continue;
       const { casualty } = rollHit(tCfg.to_hit, cfg.defense ?? 6, tCfg.penetration ?? 0);
       if (casualty) returnCasualties.set(sub.id, (returnCasualties.get(sub.id) ?? 0) + 1);
     }
@@ -466,7 +411,7 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
       combatLogInserts.push({
         game_id: gameId, turn, phase: 2,
         hex_q: sub.hex_q, hex_r: sub.hex_r,
-        log_type: 'submarine_ranged',
+        log_type: 'submarine_combat',
         faction_id: sub.faction_id,
         data: {
           sub: sub.id,
@@ -477,23 +422,20 @@ export async function executePhase2(db, gameId, turn, survivingBombers = []) {
       });
     }
 
-    // Post-attack bonus detection roll (+2) for each undetected attack.
-    // A single success from any struck target reveals the sub's hex.
-    const struckAndUndetected = inRange.filter(t =>
+    // Post-attack bonus detection (+2) for struck-undetected targets.
+    const struckAndUndetected = inHex.filter(t =>
       !detectedBySomeTarget.has(t.id) && subCasualties.has(t.id)
     );
 
     let subRevealed = false;
     for (const t of struckAndUndetected) {
       if (subRevealed) break;
-      const d = hexDist(sub.hex_q, sub.hex_r, t.hex_q, t.hex_r);
-      const bonusScore = 7 + (t.cfg?.detection_rating ?? 0) - cfg.stealth_rating - d + 2;
+      const bonusScore = 7 + (t.cfg?.detection_rating ?? 0) - cfg.stealth_rating - 1 + 2;
       const revealed = bonusScore > 12 || (bonusScore >= 2 && roll2d6() <= bonusScore);
       if (revealed) subRevealed = true;
     }
 
     if (subRevealed) {
-      // Write sub hex to scouted_hexes for all enemy factions with nearby naval units
       const nearbyEnemyFactions = [...new Set(
         navalUnits
           .filter(t =>

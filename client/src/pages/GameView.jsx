@@ -264,22 +264,90 @@ export default function GameView() {
 
 const LOG_TYPE_COLOR = { combat: '#ef4444', bombardment: '#fb923c', retreat: '#60a5fa', naval_combat: '#38bdf8' };
 
+function totalCasualties(casualties) {
+  return Object.values(casualties ?? {}).reduce((s, v) => s + v, 0);
+}
+
 function PlayerLogEntry({ entry }) {
   const [open, setOpen] = useState(false);
   const d = entry.data ?? {};
   const phase = entry.phase === 1 ? 'Air' : entry.phase === 2 ? 'Naval' : entry.phase === 3 ? 'Ground' : 'Phase 4';
+  const typeColor = LOG_TYPE_COLOR[entry.log_type] ?? '#64748b';
 
   function summary() {
     if (d.event === 'retreat') return `Unit retreated to (${d.to_hex?.q},${d.to_hex?.r})`;
-    if (d.event === 'retreat_fire') return `Retreat fire: ${Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0)} casualties`;
+    if (d.event === 'retreat_fire') return `Retreat fire: ${totalCasualties(d.casualties)} casualties`;
     if (d.event === 'pursuit_roll') return `Pursuit ${d.success ? 'succeeded' : 'failed'} (rolled ${d.roll}/${d.roll_target})`;
-    if (entry.log_type === 'bombardment') return `Bombardment: ${d.hits_vs_units ?? 0} unit hits, ${d.hits_vs_infra ?? 0} infra hits`;
-    const totalCas = Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0);
-    if (totalCas > 0) return `Combat at (${entry.hex_q},${entry.hex_r}): ${totalCas} total casualties`;
+    if (entry.log_type === 'bombardment') {
+      const cas = totalCasualties(d.casualties);
+      const hits = d.hits_vs_units ?? 0;
+      const saved = hits - cas;
+      const unitStr = hits === 0
+        ? 'no unit hits'
+        : cas === 0
+          ? `${hits} hit${hits !== 1 ? 's' : ''} — all saved`
+          : `${hits} hit${hits !== 1 ? 's' : ''} — ${cas} casualt${cas !== 1 ? 'ies' : 'y'}, ${saved} saved`;
+      const infraStr = (d.hits_vs_infra ?? 0) > 0 ? `, ${d.hits_vs_infra} infra hit${d.hits_vs_infra !== 1 ? 's' : ''}` : '';
+      return `Bombardment (${entry.hex_q},${entry.hex_r}): ${unitStr}${infraStr}`;
+    }
+    const cas = totalCasualties(d.casualties);
+    if (cas > 0) return `Combat at (${entry.hex_q},${entry.hex_r}): ${cas} total casualties`;
     return `Event at (${entry.hex_q},${entry.hex_r})`;
   }
 
-  const typeColor = LOG_TYPE_COLOR[entry.log_type] ?? '#64748b';
+  function detail() {
+    if (entry.log_type === 'bombardment') {
+      const cas = totalCasualties(d.casualties);
+      const hits = d.hits_vs_units ?? 0;
+      const infraHits = d.hits_vs_infra ?? 0;
+      const unitRolls = d.unit_rolls ?? [];
+      return (
+        <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4, lineHeight: 1.6 }}>
+          <div>
+            <span style={{ color: '#cbd5e1' }}>{d.firer_type} ×{d.firer_count}</span>
+            {' '}from ({d.firer_hex?.q},{d.firer_hex?.r}) → ({d.target_hex?.q},{d.target_hex?.r})
+            {' '}| To-Hit ≤{d.to_hit} | Pen {d.pen}
+          </div>
+          <div style={{ color: hits > 0 ? '#fb923c' : '#64748b' }}>
+            {hits} unit hit{hits !== 1 ? 's' : ''} — {cas > 0
+              ? <span style={{ color: '#ef4444' }}>{cas} casualt{cas !== 1 ? 'ies' : 'y'}</span>
+              : hits > 0 ? 'all saved' : 'none'}
+            {infraHits > 0 && <span style={{ color: '#f59e0b' }}>, {infraHits} infra hit{infraHits !== 1 ? 's' : ''}</span>}
+          </div>
+          {unitRolls.map((ur, i) => {
+            const saveTarget = ur.defense + ur.bonus - (d.pen ?? 0);
+            const urCas = ur.rolls.filter(r => r.casualty).length;
+            return (
+              <div key={i} style={{ marginTop: 4, paddingLeft: 8, borderLeft: '1px solid #1e293b' }}>
+                <div style={{ color: '#cbd5e1', fontWeight: 600 }}>
+                  {ur.unit_type} ×{ur.quantity}
+                  <span style={{ color: '#64748b', fontWeight: 400 }}>
+                    {' '}(Def {ur.defense}{ur.bonus > 0 ? `+${ur.bonus}` : ''} → save ≤{Math.max(0, saveTarget)})
+                    {urCas > 0 && <span style={{ color: '#ef4444' }}> — {urCas} casualt{urCas !== 1 ? 'ies' : 'y'}</span>}
+                  </span>
+                </div>
+                {ur.rolls.map((r, j) => (
+                  <div key={j} style={{ paddingLeft: 8, color: r.hit ? (r.casualty ? '#ef4444' : '#22c55e') : '#475569' }}>
+                    Die {j + 1}: rolled {r.atk} {r.hit ? `≤${d.to_hit} HIT` : `>${d.to_hit} miss`}
+                    {r.hit && r.save != null && (
+                      <span style={{ color: r.casualty ? '#ef4444' : '#22c55e' }}>
+                        {' '}| save {r.save} vs ≤{r.save_target} → {r.casualty ? 'FAIL' : 'saved'}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    return (
+      <pre style={{ color: '#64748b', fontSize: 10, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        {JSON.stringify(d, null, 2)}
+      </pre>
+    );
+  }
 
   return (
     <div style={{ marginBottom: 4, borderLeft: `2px solid ${typeColor}`, paddingLeft: 8 }}>
@@ -291,11 +359,7 @@ function PlayerLogEntry({ entry }) {
         <span style={{ color: '#cbd5e1', fontSize: 12 }}>{summary()}</span>
         <span style={{ color: '#475569', fontSize: 11, marginLeft: 'auto' }}>{open ? '▲' : '▼'}</span>
       </div>
-      {open && (
-        <pre style={{ color: '#64748b', fontSize: 10, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {JSON.stringify(d, null, 2)}
-        </pre>
-      )}
+      {open && detail()}
     </div>
   );
 }

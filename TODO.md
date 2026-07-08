@@ -4,11 +4,15 @@
 
 ## Bugs / Immediate Fixes
 
-- [ ] **`selectedUnit` goes stale after hex refresh** — In `HexMap.jsx`, `selected` hex is re-synced from the hexes array on refresh (line 180–183), but `selectedUnit` is not updated. After a turn advances or GM modifies a unit, the order panel shows stale quantity/HP for the selected unit. Fix: when syncing `selected` on hex refresh, also find and update `selectedUnit` by ID from the updated hex's units list.
-
 - [ ] **Naval path-crossing detection misses B-C crossing when A-B fires first** — In `navalPhase.js` step loop, once a unit is added to `processed` after crossing with unit A, it won't be checked for a second crossing with unit C in the same step. Very rare edge case (3 ships crossing in the same step). Lower priority.
+- [ ] **Repair slot cap not enforced** — `phase4.js` advances repair orders without checking whether the airbase/harbor has available slots (floor(current_hp/2)). Multiple units can be repaired simultaneously beyond capacity.
+- [ ] **AA overwatch fires at undetected aircraft** — `rangedFire.js` AA pass doesn't check detection before firing. AA should only fire at detected flight groups (effective_stealth = 0 = auto-detected; stealth > 0 = detection roll required).
 
-- [ ] **`production_queue` insert doesn't set `status` field** — `map.js` production route inserts rows without `status: 'pending'`. If the DB column lacks a DEFAULT 'pending', items silently drop out of all `eq('status','pending')` queries and never advance. Verify Supabase schema has `DEFAULT 'pending'` on the column; if not, add it to migrations.
+---
+
+## Cleanup (ready now)
+
+- [ ] **Delete `supabase/migrations_archive/`** — 29 old migrations archived after consolidation; new 7-file schema verified working. Safe to delete.
 
 ---
 
@@ -25,6 +29,10 @@
 - [x] **Bombard order UI** — target hex selection for Artillery and Battleship units
 
 - [x] **Retreat / Pursue order UI** — buttons visible only when unit is locked in combat (enemy in same hex)
+
+- [ ] **Patrol order** — button is hidden in the UI. Implement ground patrol intercept logic (radius 1 foot / 2 mechanized; unit moves to intercept hex, fights there, stays on win) then re-expose the button in `HexMap.jsx` (search for "Patrol button hidden").
+
+- [ ] **Patrol / AA standing order hex highlight** — when a unit has patrol or AA standing order set, highlight its patrol/overwatch radius on the map (green for patrol, amber for AA) so players can see coverage zones. Wire in alongside patrol implementation.
 
 - [ ] **Combat log viewer** — GM panel showing what happened each turn (bombardments, casualties, bridge collapses, etc.)
 
