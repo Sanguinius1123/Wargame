@@ -38,10 +38,16 @@ router.patch('/:gameId/factions/:factionId', requireGM, async (req, res) => {
   const newId = updates.profile_id;
   if (profile_id !== undefined && oldId !== newId) {
     if (newId) {
-      await adminDb.from('game_participants').upsert(
-        { game_id: gameId, profile_id: newId, role: 'player' },
-        { onConflict: 'game_id,profile_id' }
-      );
+      // GMs are already participants — don't overwrite their 'gm' role with 'player'.
+      // The factions.profile_id assignment is enough for GMs to get a faction view.
+      const { data: assignedProfile } = await adminDb
+        .from('profiles').select('global_role').eq('id', newId).single();
+      if (assignedProfile?.global_role !== 'gm') {
+        await adminDb.from('game_participants').upsert(
+          { game_id: gameId, profile_id: newId, role: 'player' },
+          { onConflict: 'game_id,profile_id' }
+        );
+      }
     }
     if (oldId) {
       // Remove from participants only if they have no other factions in this game

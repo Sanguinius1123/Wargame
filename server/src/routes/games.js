@@ -6,6 +6,8 @@ import { resolveTurn } from '../utils/resolveTurn.js';
 const router = Router();
 
 // GET /api/games — list games the user participates in
+// Each game includes has_player_faction: true if the user is assigned to a faction in that game.
+// Used by the client to decide whether to show the "Play" button.
 router.get('/', requireAuth, async (req, res) => {
   const { data, error } = await adminDb
     .from('game_participants')
@@ -13,7 +15,19 @@ router.get('/', requireAuth, async (req, res) => {
     .eq('profile_id', req.user.id);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data.map(d => ({ ...d.games, role: d.role, turn_ready: d.turn_ready })));
+  const games = data.map(d => ({ ...d.games, role: d.role, turn_ready: d.turn_ready }));
+
+  if (games.length) {
+    const { data: factionRows } = await adminDb
+      .from('factions')
+      .select('game_id')
+      .eq('profile_id', req.user.id)
+      .in('game_id', games.map(g => g.id));
+    const withFaction = new Set((factionRows ?? []).map(f => f.game_id));
+    return res.json(games.map(g => ({ ...g, has_player_faction: withFaction.has(g.id) })));
+  }
+
+  res.json(games);
 });
 
 // POST /api/games — GM creates a new game
