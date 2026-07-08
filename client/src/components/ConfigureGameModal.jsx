@@ -86,7 +86,7 @@ export default function ConfigureGameModal({ game, onClose, onSaved }) {
     else { const d = await r.json(); setErr(d.error ?? 'Failed to delete game'); }
   }
 
-  const availablePlayers = allPlayers.filter(p => p.global_role === 'player');
+  const availablePlayers = allPlayers;
 
   return (
     <div style={s.backdrop} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
