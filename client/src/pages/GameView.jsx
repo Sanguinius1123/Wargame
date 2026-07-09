@@ -342,6 +342,27 @@ function PlayerLogEntry({ entry }) {
         </div>
       );
     }
+    if (d.volleys?.length) {
+      return (
+        <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4, lineHeight: 1.6 }}>
+          {d.volleys.map((v, i) => (
+            <div key={i} style={{ marginBottom: 6 }}>
+              <div style={{ color: '#fbbf24', fontWeight: 600 }}>
+                {v.attacker_faction}: {v.firing_types.map(f => `${f.type} ×${f.qty}`).join(', ')} → {v.total_dice} dice
+              </div>
+              {v.targets.map((t, j) => (
+                <div key={j} style={{ paddingLeft: 10 }}>
+                  vs <span style={{ color: '#e2e8f0' }}>{t.type} ×{t.qty}</span> ({t.dice} dice) —{' '}
+                  <span style={{ color: '#ef4444' }}>{t.hits} hit{t.hits !== 1 ? 's' : ''}</span>,{' '}
+                  <span style={{ color: '#60a5fa' }}>{t.saves} saved</span>,{' '}
+                  <span style={{ color: '#f87171', fontWeight: 600 }}>{t.casualties} casualt{t.casualties !== 1 ? 'ies' : 'y'}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
     return (
       <pre style={{ color: '#64748b', fontSize: 10, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
         {JSON.stringify(d, null, 2)}

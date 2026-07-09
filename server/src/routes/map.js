@@ -727,15 +727,32 @@ router.get('/:gameId/combat-log', requireAuth, async (req, res) => {
 
   if (turn < 0) return res.json({ turn: 0, current_turn: currentTurn, entries: [] });
 
-  const { data: entries, error } = await adminDb
+  let query = adminDb
     .from('combat_log')
     .select('id, turn, phase, hex_q, hex_r, log_type, faction_id, data, created_at')
     .eq('game_id', gameId)
     .eq('turn', turn)
     .order('created_at', { ascending: true });
 
+  if (!isGM) query = query.neq('log_type', 'detection');
+
+  const { data: entries, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ turn, current_turn: currentTurn, entries: entries ?? [] });
+
+  let filtered = entries ?? [];
+
+  // For players: restrict to hexes within their current LOS.
+  if (!isGM) {
+    const { data: faction } = await adminDb
+      .from('factions').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).maybeSingle();
+    if (faction) {
+      const { visible, scouted } = await computeVisibility(adminDb, faction.id, gameId);
+      const knownHexes = new Set([...visible, ...scouted]);
+      filtered = filtered.filter(e => knownHexes.has(`${e.hex_q},${e.hex_r}`));
+    }
+  }
+
+  res.json({ turn, current_turn: currentTurn, entries: filtered });
 });
 
 export default router;
