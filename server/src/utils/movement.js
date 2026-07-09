@@ -561,11 +561,15 @@ export async function executeGroundMoves(db, gameId, turn) {
 
   // ------------------------------------------------------------------
   // 4a. Enemy-hex truncation: if a unit's path passes through a hex
-  //     already occupied by an enemy at the START of movement, stop
-  //     the unit at the first such hex instead of the intended destination.
-  //     Close combat will then resolve at that hex in the combat step.
+  //     occupied by a STATIONARY enemy (one with no move order this turn),
+  //     stop at that hex. Units that are moving away vacate their start
+  //     hex and should not block passage — the convergence check (4a-b)
+  //     handles catching up with them at their destination.
   // ------------------------------------------------------------------
   {
+    // Units with move orders are vacating their start hex this turn.
+    const movingUnitIds = new Set((orders ?? []).map(o => o.unit_id));
+
     const { data: occupancyRows } = await db
       .from('units')
       .select('id, faction_id, hex_q, hex_r')
@@ -573,6 +577,7 @@ export async function executeGroundMoves(db, gameId, turn) {
 
     const hexFactions = new Map(); // "q,r" → Set<faction_id>
     for (const u of occupancyRows ?? []) {
+      if (movingUnitIds.has(u.id)) continue; // vacating their hex this turn
       const key = `${u.hex_q},${u.hex_r}`;
       if (!hexFactions.has(key)) hexFactions.set(key, new Set());
       hexFactions.get(key).add(u.faction_id);
