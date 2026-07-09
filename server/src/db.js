@@ -1,15 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
+import ws from 'ws';
+
+const realtimeOpts = { transport: ws };
 
 export const adminDb = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SECRET_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false } }
+  { auth: { autoRefreshToken: false, persistSession: false }, realtime: realtimeOpts }
 );
 
 export const anonDb = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_PUBLISHABLE_KEY
+  process.env.SUPABASE_PUBLISHABLE_KEY,
+  { realtime: realtimeOpts }
 );
 
 // Supabase projects cap rows at max_rows (default 1000) per request.
