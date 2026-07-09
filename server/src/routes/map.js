@@ -19,7 +19,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
         .select('id, hex_q, hex_r, terrain, owner_faction_id, vegetation_hp, has_light_vegetation, has_heavy_vegetation, has_urban, has_settlement, settlement_name, settlement_size, has_airstrip, has_railroad')
         .eq('game_id', gameId)),
       fetchAll(() => adminDb.from('units')
-        .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, factions(name, color), unit_type_config(name, tags, move, bombard_to_hit, bombard_range, stealth_rating)')
+        .select('id, hex_q, hex_r, quantity, hp, faction_id, standing_order, fortification_level, continuous_bombard_q, continuous_bombard_r, detected_quantities, factions(name, color), unit_type_config(name, tags, move, bombard_to_hit, bombard_range, stealth_rating)')
         .eq('game_id', gameId)),
       fetchAll(() => adminDb.from('buildings')
         .select('id, hex_q, hex_r, type, current_hp, max_hp, owner_faction_id')
@@ -44,6 +44,7 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
       bombard_to_hit: u.unit_type_config?.bombard_to_hit ?? null,
       bombard_range:  u.unit_type_config?.bombard_range  ?? null,
       stealth_rating: u.unit_type_config?.stealth_rating ?? 0,
+      detected_quantities: u.detected_quantities ?? {},
       quantity: u.quantity,
       hp: u.hp,
       standing_order: u.standing_order,
@@ -100,14 +101,17 @@ router.get('/:gameId/hexes', requireAuth, async (req, res) => {
     const k = `${h.hex_q},${h.hex_r}`;
     if (visible.has(k)) {
       const allUnits = unitsByHex[k] ?? [];
-      // Enemy stealth units (submarines) are hidden — they don't appear on the map
-      // unless detected. Own units are always shown.
-      const sanitizedUnits = allUnits
-        .filter(u => u.factionId === playerFactionId || !(u.tags ?? []).includes('stealth'))
-        .map(u => {
-          if (u.factionId === playerFactionId) return u;
-          return { id: u.id, type: u.type, tags: u.tags, quantity: u.quantity, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor };
-        });
+      // Own units always visible. Enemy units with stealth_rating > 0 only visible if
+      // detected last Phase 4; quantity capped to how many were actually detected.
+      const sanitizedUnits = allUnits.flatMap(u => {
+        if (u.factionId === playerFactionId) return [u];
+        if (u.stealth_rating > 0) {
+          const detectedQty = (u.detected_quantities ?? {})[playerFactionId] ?? 0;
+          if (detectedQty === 0) return [];
+          return [{ id: u.id, type: u.type, tags: u.tags, quantity: detectedQty, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor }];
+        }
+        return [{ id: u.id, type: u.type, tags: u.tags, quantity: u.quantity, hp: u.hp, factionId: u.factionId, factionName: u.factionName, factionColor: u.factionColor }];
+      });
       return { ...h, units: sanitizedUnits, buildings: buildingsByHex[k] ?? [], resource_tile: resourceTileByHex[k] ?? null, visibility: 'visible' };
     }
     if (scouted.has(k)) {
@@ -268,8 +272,12 @@ router.post('/:gameId/orders', requireAuth, async (req, res) => {
   // Clear existing orders for the target unit this turn
   await adminDb.from('movement_orders').delete().eq('unit_id', targetUnitId).eq('turn', turn);
 
-  // Skip order insertion for a pure split-in-place (no path, no destination hex given)
-  const hasOrderPayload = (Array.isArray(path) && path.length > 0) || to_hex_q != null || to_hex_r != null;
+  // Skip order insertion only for a pure split-in-place move (no path, no destination).
+  // Non-move orders (fortify, bombard, repair, pursue_if_retreat) always get a row.
+  const hasOrderPayload = order_type !== 'move' ||
+    (Array.isArray(path) && path.length > 0) ||
+    to_hex_q != null || to_hex_r != null ||
+    target_hex_q != null;
   if (!hasOrderPayload) {
     return res.json({ orders: [], split_unit_id: split_quantity != null ? targetUnitId : null });
   }
@@ -634,6 +642,70 @@ router.patch('/:gameId/units/:unitId/standing-order', requireAuth, async (req, r
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// PATCH /api/map/:gameId/units/:unitId/continuous-bombard
+// Sets or clears a persistent bombard target on a unit.
+// Body: { target_hex_q, target_hex_r } — both null to clear.
+router.patch('/:gameId/units/:unitId/continuous-bombard', requireAuth, async (req, res) => {
+  const { gameId, unitId } = req.params;
+  const { target_hex_q, target_hex_r } = req.body;
+  const isGM = req.user.global_role === 'gm';
+
+  const { data: unit } = await adminDb
+    .from('units')
+    .select('id, faction_id, factions(profile_id)')
+    .eq('id', unitId)
+    .single();
+
+  if (!unit) return res.status(404).json({ error: 'Unit not found' });
+  if (!isGM && unit.factions?.profile_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your unit' });
+  }
+
+  const q = target_hex_q != null ? Number(target_hex_q) : null;
+  const r = target_hex_r != null ? Number(target_hex_r) : null;
+  const { error } = await adminDb
+    .from('units')
+    .update({ continuous_bombard_q: q, continuous_bombard_r: r })
+    .eq('id', unitId);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, continuous_bombard_q: q, continuous_bombard_r: r });
+});
+
+// GET /api/map/:gameId/combat-hexes
+// Returns distinct hexes where any combat event occurred last completed turn.
+// Used by the client to show a "combat occurred here" marker on the map.
+router.get('/:gameId/combat-hexes', requireAuth, async (req, res) => {
+  const { gameId } = req.params;
+  const isGM = req.user.global_role === 'gm';
+
+  if (!isGM) {
+    const { data: participant } = await adminDb
+      .from('game_participants').select('id').eq('game_id', gameId).eq('profile_id', req.user.id).maybeSingle();
+    if (!participant) return res.status(403).json({ error: 'Not a participant' });
+  }
+
+  const { data: game } = await adminDb.from('games').select('current_turn').eq('id', gameId).single();
+  const lastTurn = (game?.current_turn ?? 1) - 1;
+  if (lastTurn < 1) return res.json([]);
+
+  const { data: entries } = await adminDb
+    .from('combat_log')
+    .select('hex_q, hex_r')
+    .eq('game_id', gameId)
+    .eq('turn', lastTurn)
+    .neq('log_type', 'detection');
+
+  // Deduplicate by hex position
+  const seen = new Set();
+  const result = [];
+  for (const e of entries ?? []) {
+    const key = `${e.hex_q},${e.hex_r}`;
+    if (!seen.has(key)) { seen.add(key); result.push({ hex_q: e.hex_q, hex_r: e.hex_r }); }
+  }
+  res.json(result);
 });
 
 // GET /api/map/:gameId/combat-log?turn=N

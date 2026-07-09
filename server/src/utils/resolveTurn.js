@@ -9,7 +9,7 @@ import { processEndOfPhase3 } from './ordersPhase.js';
 import { executeRangedFireStep } from './rangedFire.js';
 import { executeGroundCombat } from './combat.js';
 import { runPhase4 } from './phase4.js';
-import { computeVisibility, markScouted } from './visibility.js';
+import { computeVisibility, markScouted, computeDetectionEvents } from './visibility.js';
 import { executePhase1 } from './airPhase.js';
 import { executePhase2 } from './navalPhase.js';
 import { captureObjectives } from './captureObjectives.js';
@@ -59,13 +59,13 @@ export async function resolveTurn(db, gameId) {
     .select()
     .single();
 
-  // Update scouted_hexes for all factions based on post-turn unit positions.
-  // This ensures fog-of-war is current when players load the map next turn.
+  // Update scouted_hexes + run detection rolls for all factions.
   const { data: factions } = await db.from('factions').select('id').eq('game_id', gameId);
   for (const f of factions ?? []) {
     const { visible } = await computeVisibility(db, f.id, gameId);
     await markScouted(db, f.id, gameId, visible, nextTurn);
   }
+  await computeDetectionEvents(db, gameId, currentTurn);
 
   return {
     game: updated,

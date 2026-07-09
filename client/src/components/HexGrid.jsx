@@ -362,6 +362,7 @@ export default function HexGrid({
   showCoords = false,
   dragUnitId = null,
   onUnitClick = null,
+  combatHexKeys = null,
 }) {
   const safeHexes = hexes ?? [];
   const SIZE = 36;
@@ -407,6 +408,7 @@ export default function HexGrid({
 
   const svgRef = useRef(null);
   const dragRef = useRef(null);
+  const didDragRef = useRef(false);
   const unitDragActiveRef = useRef(false);
   const pixelsRef = useRef([]);
   pixelsRef.current = pixels;
@@ -424,26 +426,28 @@ export default function HexGrid({
     if (!panZoom) return;
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1.15 : 0.87;
-    const rect = svgRef.current.getBoundingClientRect();
-    const mx = vb.x + (e.clientX - rect.left) / rect.width  * vb.width;
-    const my = vb.y + (e.clientY - rect.top)  / rect.height * vb.height;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const { x: mx, y: my } = pt.matrixTransform(svg.getScreenCTM().inverse());
     const newW = Math.min(Math.max(vb.width * factor, natW * 0.2), natW * 5);
     const newH = Math.min(Math.max(vb.height * factor, natH * 0.2), natH * 5);
     setVb({ x: mx - (mx - vb.x) * (newW / vb.width), y: my - (my - vb.y) * (newH / vb.height), width: newW, height: newH });
   }, [panZoom, vb, natW, natH]);
 
   // Convert client (screen) coordinates to the nearest hex key.
-  // Uses nearest-center (Voronoi) which is exact for a regular hex tiling — no
-  // circular threshold needed. minX/minY are derived fresh from pixelsRef each
-  // call so there is no stale-closure risk.
+  // Uses getScreenCTM so the transform correctly accounts for the SVG viewBox,
+  // preserveAspectRatio letterboxing, and any CSS transforms on parent elements.
   const clientToHexKey = useCallback((clientX, clientY) => {
     const pts = pixelsRef.current;
-    if (!svgRef.current || !pts.length) return null;
-    const rect = svgRef.current.getBoundingClientRect();
-    const svgX = vb.x + (clientX - rect.left) / rect.width  * vb.width;
-    const svgY = vb.y + (clientY - rect.top)  / rect.height * vb.height;
-    // Compute SVG-space hex centers from raw pixel positions.
-    // cx = h.x - liveMinX + PAD/2  where liveMinX = min(h.x) - PAD
+    const svg = svgRef.current;
+    if (!svg || !pts.length) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const { x: svgX, y: svgY } = pt.matrixTransform(svg.getScreenCTM().inverse());
     let liveMinX = pts[0].x, liveMinY = pts[0].y;
     for (const h of pts) {
       if (h.x < liveMinX) liveMinX = h.x;
@@ -459,11 +463,12 @@ export default function HexGrid({
       if (d < bestD) { bestD = d; best = `${h.hex_q},${h.hex_r}`; }
     }
     return best;
-  }, [vb, PAD]);
+  }, [PAD]);
 
   const onMouseDown = useCallback((e) => {
     if (!panZoom || e.button !== 0) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, vb: { ...vb }, moved: false };
+    didDragRef.current = false;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, vb: { ...vb } };
   }, [panZoom, vb]);
 
   const onMouseMove = useCallback((e) => {
@@ -474,12 +479,11 @@ export default function HexGrid({
     if (!dragRef.current) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    if (!dragRef.current.moved && Math.abs(dx) + Math.abs(dy) > 5) dragRef.current.moved = true;
-    if (!dragRef.current.moved) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const sx = dragRef.current.vb.width  / rect.width;
-    const sy = dragRef.current.vb.height / rect.height;
-    setVb({ ...dragRef.current.vb, x: dragRef.current.vb.x - dx * sx, y: dragRef.current.vb.y - dy * sy });
+    if (Math.abs(dx) + Math.abs(dy) > 6) didDragRef.current = true;
+    if (!didDragRef.current) return;
+    const ctm = svgRef.current?.getScreenCTM();
+    if (!ctm) return;
+    setVb({ ...dragRef.current.vb, x: dragRef.current.vb.x - dx / ctm.a, y: dragRef.current.vb.y - dy / ctm.d });
   }, [clientToHexKey, onDragMove]);
 
   const onMouseUp = useCallback((e) => {
@@ -494,7 +498,7 @@ export default function HexGrid({
   }, [clientToHexKey, onDragEnd]);
 
   const handleHexClick = useCallback((h) => {
-    if (dragRef.current?.moved) return;
+    if (didDragRef.current) return;
     if (moveMode || bombardMode || buildMode) {
       onPathClick?.(h);
     } else {
@@ -601,6 +605,25 @@ export default function HexGrid({
                 strokeWidth={2}
                 style={{ pointerEvents: 'none' }}
               />
+            )}
+
+            {/* Combat-occurred-last-turn marker */}
+            {combatHexKeys?.has(hexKey) && !isDark && (
+              <g transform={`translate(${cx - SIZE * 0.42},${cy - SIZE * 0.38})`}
+                 style={{ pointerEvents: 'none' }}>
+                {[0, 45, 90, 135].map(deg => {
+                  const a = deg * Math.PI / 180;
+                  const r = 4.5;
+                  return (
+                    <line key={deg}
+                      x1={-Math.cos(a) * r} y1={-Math.sin(a) * r}
+                      x2={ Math.cos(a) * r} y2={ Math.sin(a) * r}
+                      stroke="#f97316" strokeWidth={1.8} strokeLinecap="round"
+                    />
+                  );
+                })}
+                <circle r={2} fill="#fef08a" stroke="#f97316" strokeWidth={0.8} />
+              </g>
             )}
 
             {/* Drag reachable range highlight */}

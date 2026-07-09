@@ -51,13 +51,13 @@ const BTN = {
 };
 
 const ORDER_TYPE_LABELS = {
-  move:    'Move',
-  fortify: 'Fortify',
-  bombard: 'Bombard',
-  retreat: 'Retreat',
+  move:    'Moving',
+  fortify: 'Fortifying',
+  bombard: 'Firing',
+  retreat: 'Retreating',
   pursue_if_retreat: 'Pursue if Retreat',
-  repair:  'Repair',
-  build:   'Build',
+  repair:  'Repairing',
+  build:   'Building',
 };
 
 export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, playerFactionId = null, faction = null, refreshKey = 0, onHexSelect = null }) {
@@ -91,6 +91,9 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
 
   // Current queued orders for the selected unit
   const [currentOrders, setCurrentOrders] = useState([]);
+
+  // Hexes where combat occurred last turn (shown as starburst markers)
+  const [combatHexKeys, setCombatHexKeys] = useState(new Set());
 
   // Ordered-units tracking: unit IDs that already have orders this turn
   const [orderedUnitIds, setOrderedUnitIds] = useState(new Set());
@@ -134,8 +137,15 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     const url = viewAsFactionId
       ? `${SERVER}/api/map/${gameId}/hexes?viewAs=${viewAsFactionId}`
       : `${SERVER}/api/map/${gameId}/hexes`;
-    const r = await fetch(url, { headers });
+    const [r, cr] = await Promise.all([
+      fetch(url, { headers }),
+      fetch(`${SERVER}/api/map/${gameId}/combat-hexes`, { headers }),
+    ]);
     if (r.ok) setHexes(await r.json());
+    if (cr.ok) {
+      const entries = await cr.json();
+      setCombatHexKeys(new Set(entries.map(e => `${e.hex_q},${e.hex_r}`)));
+    }
     setLoading(false);
     loadOrderedUnits();
   }, [gameId, viewAsFactionId, refreshKey, loadOrderedUnits]);
@@ -234,7 +244,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     if (!ownFactionId) return;
     const unordered = [];
     for (const hex of hexes) {
-      const unit = hex.units?.find(u => u.factionId === ownFactionId && !orderedUnitIds.has(u.id));
+      const unit = hex.units?.find(u =>
+        u.factionId === ownFactionId &&
+        !orderedUnitIds.has(u.id) &&
+        u.fortification_level !== 1
+      );
       if (unit) unordered.push({ hex, unit });
     }
     if (unordered.length === 0) return;
@@ -456,6 +470,52 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
     await fetchOrders(selectedUnit.id);
     loadOrderedUnits();
   }, [selectedUnit, bombardTarget, gameId, viewAsFactionId, fetchOrders, loadOrderedUnits]);
+
+  // "Continue Bombardment": places the one-time order AND persists the target on the unit.
+  const confirmContinuousBombard = useCallback(async () => {
+    if (!selectedUnit || !bombardTarget) return;
+    const headers = await authHeader();
+    await Promise.all([
+      // One-time order for this turn
+      fetch(`${SERVER}/api/map/${gameId}/orders`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: selectedUnit.id,
+          order_type: 'bombard',
+          target_hex_q: bombardTarget.q,
+          target_hex_r: bombardTarget.r,
+          ...(viewAsFactionId ? { asFactionId: viewAsFactionId } : {}),
+        }),
+      }),
+      // Persistent standing target
+      fetch(`${SERVER}/api/map/${gameId}/units/${selectedUnit.id}/continuous-bombard`, {
+        method: 'PATCH',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_hex_q: bombardTarget.q, target_hex_r: bombardTarget.r }),
+      }),
+    ]);
+    // Update local unit state so the UI reflects continuous mode immediately
+    setSelectedUnit(prev => prev ? { ...prev, continuous_bombard_q: bombardTarget.q, continuous_bombard_r: bombardTarget.r } : prev);
+    setBombardMode(false);
+    setBombardTarget(null);
+    setBombardRangeKeys(new Set());
+    setOrderedUnitIds(prev => new Set([...prev, selectedUnit.id]));
+    await fetchOrders(selectedUnit.id);
+    loadOrderedUnits();
+  }, [selectedUnit, bombardTarget, gameId, viewAsFactionId, fetchOrders, loadOrderedUnits]);
+
+  // Stop continuous bombardment
+  const stopContinuousBombard = useCallback(async () => {
+    if (!selectedUnit) return;
+    const headers = await authHeader();
+    await fetch(`${SERVER}/api/map/${gameId}/units/${selectedUnit.id}/continuous-bombard`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_hex_q: null, target_hex_r: null }),
+    });
+    setSelectedUnit(prev => prev ? { ...prev, continuous_bombard_q: null, continuous_bombard_r: null } : prev);
+  }, [selectedUnit, gameId]);
 
   const enterRetreatMode = useCallback(() => {
     if (!selectedUnit) return;
@@ -855,7 +915,11 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
   const isPlayerMode = !isGM || !!viewAsFactionId;
   const unorderedCount = isPlayerMode && ownFactionId
     ? hexes.reduce((n, hex) => {
-        const unit = hex.units?.find(u => u.factionId === ownFactionId && !orderedUnitIds.has(u.id));
+        const unit = hex.units?.find(u =>
+          u.factionId === ownFactionId &&
+          !orderedUnitIds.has(u.id) &&
+          u.fortification_level !== 1
+        );
         return unit ? n + 1 : n;
       }, 0)
     : 0;
@@ -885,7 +949,16 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
         <div style={{ background: '#080d15', borderRadius: 8, overflow: 'hidden', height: 'calc(100vh - 155px)', minHeight: 480, position: 'relative' }}>
           {loading
             ? <p style={{ color: '#64748b', padding: 24 }}>Loading map…</p>
-            : <HexGrid
+            : (() => {
+                const committedBombardOrder = !bombardMode && currentOrders.find(o => o.order_type === 'bombard');
+                const hasContinuousBombard = !bombardMode && selectedUnit?.continuous_bombard_q != null;
+                const committedBombardTargetKey = committedBombardOrder
+                  ? `${committedBombardOrder.target_hex_q},${committedBombardOrder.target_hex_r}`
+                  : hasContinuousBombard
+                    ? `${selectedUnit.continuous_bombard_q},${selectedUnit.continuous_bombard_r}`
+                    : null;
+                const effectiveBombardRangeKeys = bombardMode ? bombardRangeKeys : null;
+                return <HexGrid
                 hexes={hexes}
                 onSelect={handleSelect}
                 panZoom
@@ -893,8 +966,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
                 moveMode={moveMode}
                 movePath={movePath}
                 bombardMode={bombardMode}
-                bombardTargetKey={bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null}
-                bombardRangeKeys={bombardRangeKeys}
+                bombardTargetKey={bombardMode ? (bombardTarget ? `${bombardTarget.q},${bombardTarget.r}` : null) : committedBombardTargetKey}
+                bombardRangeKeys={effectiveBombardRangeKeys}
                 buildMode={buildMode || flightGroupMode || retreatMode}
                 buildTargetKey={
                   buildTarget ? `${buildTarget.q},${buildTarget.r}` :
@@ -911,7 +984,9 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
                 onUnitClick={handleUnitClick}
                 showCoords={isGM}
                 dragUnitId={dragUnit?.id}
-              />
+                combatHexKeys={combatHexKeys}
+              />;
+              })()
           }
         </div>
       </div>
@@ -939,6 +1014,8 @@ export default function HexMap({ gameId, isGM = false, viewAsFactionId = null, p
               onCancelMove={cancelMove}
               onEnterBombardMode={enterBombardMode}
               onConfirmBombard={confirmBombard}
+              onConfirmContinuousBombard={confirmContinuousBombard}
+              onStopContinuousBombard={stopContinuousBombard}
               onCancelBombard={cancelBombard}
               onEnterBuildMode={enterBuildMode}
               onConfirmBuild={confirmBuild}
@@ -1060,6 +1137,8 @@ function HexDetail({
   onCancelSplit,
   onSplitQtyChange,
   onConfirmSplitHere,
+  onConfirmContinuousBombard,
+  onStopContinuousBombard,
 }) {
   const vis = hex.visibility ?? 'visible';
 
@@ -1212,6 +1291,8 @@ function HexDetail({
               onCancelMove={onCancelMove}
               onEnterBombardMode={onEnterBombardMode}
               onConfirmBombard={onConfirmBombard}
+              onConfirmContinuousBombard={onConfirmContinuousBombard}
+              onStopContinuousBombard={onStopContinuousBombard}
               onCancelBombard={onCancelBombard}
               onEnterBuildMode={onEnterBuildMode}
               onConfirmBuild={onConfirmBuild}
@@ -1310,12 +1391,20 @@ function GMUnitRow({ unit, gameId, onRefresh }) {
 
 const TERRAINS = ['plains', 'hills', 'mountains', 'desert', 'wetlands', 'water'];
 
+function resolveVegHp(hex) {
+  const hp = hex.vegetation_hp;
+  if (hp > 0) return hp;
+  if (hex.has_heavy_vegetation) return 11 + Math.floor(Math.random() * 10); // 11-20
+  if (hex.has_light_vegetation) return 1  + Math.floor(Math.random() * 10); // 1-10
+  return 0;
+}
+
 function GMHexEditor({ hex, gameId, onRefresh }) {
   const [form, setForm] = useState({
     terrain:         hex.terrain ?? 'plains',
     has_settlement:  hex.has_settlement ?? false,
     settlement_size: hex.settlement_size ?? 0,
-    vegetation_hp:   hex.vegetation_hp ?? 0,
+    vegetation_hp:   resolveVegHp(hex),
     has_railroad:    hex.has_railroad ?? false,
   });
   const [saving, setSaving] = useState(false);
@@ -1327,7 +1416,7 @@ function GMHexEditor({ hex, gameId, onRefresh }) {
       terrain:         hex.terrain ?? 'plains',
       has_settlement:  hex.has_settlement ?? false,
       settlement_size: hex.settlement_size ?? 0,
-      vegetation_hp:   hex.vegetation_hp ?? 0,
+      vegetation_hp:   resolveVegHp(hex),
       has_railroad:    hex.has_railroad ?? false,
     });
     setMsg('');
@@ -1445,6 +1534,8 @@ function OrderPanel({
   onCancelSplit,
   onSplitQtyChange,
   onConfirmSplitHere,
+  onConfirmContinuousBombard,
+  onStopContinuousBombard,
 }) {
   const [pendingBuildType, setPendingBuildType] = useState('');
 
@@ -1457,7 +1548,7 @@ function OrderPanel({
   // Build a summary list of queued order types (deduplicated for non-move orders)
   const orderSummary = [];
   if (moveSteps > 0) {
-    orderSummary.push(`Move (${moveSteps} step${moveSteps !== 1 ? 's' : ''})`);
+    orderSummary.push(`Moving (${moveSteps} step${moveSteps !== 1 ? 's' : ''})`);
   }
   const nonMoveTypes = [...new Set(
     currentOrders.filter(o => o.order_type !== 'move').map(o => o.order_type)
@@ -1484,8 +1575,20 @@ function OrderPanel({
             {hasHp ? `${unit.hp} HP` : `×${unit.quantity}`}
           </span>
         </div>
-        {unit.standing_order && <Tag label={unit.standing_order} color="#6366f1" />}
+        {unit.standing_order && unit.standing_order !== 'hold_position' && (
+          <Tag label={unit.standing_order === 'patrol' ? 'Patrol' : unit.standing_order === 'safety' ? 'Safety' : unit.standing_order} color="#6366f1" />
+        )}
         {unit.fortification_level === 1 && <Tag label="Fortified +1 def" color="#f59e0b" />}
+        {unit.continuous_bombard_q != null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <Tag label={`Continuous fire → (${unit.continuous_bombard_q},${unit.continuous_bombard_r})`} color="#f97316" />
+            <button
+              style={{ background: 'none', border: '1px solid #7f1d1d', color: '#f87171', fontSize: 10, padding: '1px 6px', borderRadius: 3, cursor: 'pointer' }}
+              onClick={onStopContinuousBombard}
+              title="Stop continuous bombardment"
+            >Stop</button>
+          </div>
+        )}
       </div>
 
       {/* Queued orders display */}
@@ -1568,6 +1671,14 @@ function OrderPanel({
               title="Confirm Bombard: Unit will remain stationary and fire indirect bombardment at the target hex this turn."
             >
               Confirm Bombard
+            </button>
+            <button
+              style={{ ...BTN.base, background: '#7c2d12', color: '#fed7aa', opacity: bombardTarget ? 1 : 0.5 }}
+              disabled={!bombardTarget}
+              onClick={onConfirmContinuousBombard}
+              title="Continue Bombardment: Fires this turn and every turn until stopped."
+            >
+              Continue Bombardment
             </button>
             <button style={{ ...BTN.base, ...BTN.cancel }} onClick={onCancelBombard}>Cancel</button>
           </div>

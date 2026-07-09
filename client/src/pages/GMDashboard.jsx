@@ -100,7 +100,7 @@ export default function GMDashboard() {
   async function advanceTurn() {
     const h = await headers();
     const r = await fetch(`${SERVER}/api/gm/${gameId}/advance-turn`, { method: 'POST', headers: h });
-    if (r.ok) { setMsg('Turn advanced.'); load(); setMapKey(k => k + 1); } else setMsg('Error advancing turn.');
+    if (r.ok) { setMsg('Turn advanced.'); load(); setMapKey(k => k + 1); } else { const d = await r.json().catch(() => ({})); setMsg(`Error advancing turn: ${d.error ?? r.status}`); console.error('[advance-turn]', d); }
   }
 
   async function loadCombatLog(turn) {
@@ -369,7 +369,7 @@ export default function GMDashboard() {
 }
 
 const PHASE_NAMES = { 1: 'Phase 1 — Air', 2: 'Phase 2 — Naval', 3: 'Phase 3 — Ground', 4: 'Phase 4 — Resolution' };
-const LOG_TYPE_COLOR = { combat: '#ef4444', bombardment: '#fb923c', retreat: '#60a5fa', pursuit_roll: '#a78bfa', auto_destroy: '#f87171' };
+const LOG_TYPE_COLOR = { combat: '#ef4444', bombardment: '#fb923c', retreat: '#60a5fa', pursuit_roll: '#a78bfa', auto_destroy: '#f87171', detection: '#34d399' };
 
 function CombatLogEntry({ entry }) {
   const [open, setOpen] = useState(false);
@@ -382,6 +382,12 @@ function CombatLogEntry({ entry }) {
     if (d.event === 'pursuit_roll') return `Pursuit ${d.success ? 'SUCCEEDED' : 'failed'} (rolled ${d.roll}/${d.roll_target})`;
     if (d.event === 'pursuit_auto_fail') return `Pursuit auto-failed (impassable terrain)`;
     if (d.event === 'pursuit_success') return `Pursuit success — pursuer holds hex`;
+    if (d.event === 'detection_roll') {
+      const result = d.detected_count > 0
+        ? `✓ ${d.detected_count}/${d.stack_size} detected`
+        : '✗ undetected';
+      return `${d.observer_faction} ${d.observer_unit} @ (${d.observer_pos?.q},${d.observer_pos?.r}) sees ${d.target_faction} ${d.target_unit} ×${d.stack_size} — score ${d.detection_score} → ${result}`;
+    }
     if (d.log_type === 'bombardment' || entry.log_type === 'bombardment') {
       return `${d.dice ?? 1} dice → ${d.hits_vs_units ?? 0} unit hits, ${d.hits_vs_infra ?? 0} infra hits`;
     }

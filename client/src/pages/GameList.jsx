@@ -145,8 +145,13 @@ export default function GameList() {
             <div style={s.sub}>Turn {g.current_turn} · {g.current_phase}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {(profile?.global_role !== 'gm' || g.has_player_faction) && (
-              <button style={s.btn} onClick={() => nav(`/game/${g.id}`)}>Play</button>
+            {(profile?.global_role !== 'gm' || g.player_faction_id) && (
+              <button style={s.btn} onClick={() => {
+                const url = profile?.global_role === 'gm' && g.player_faction_id
+                  ? `/game/${g.id}?viewAs=${g.player_faction_id}`
+                  : `/game/${g.id}`;
+                nav(url);
+              }}>Play</button>
             )}
             {profile?.global_role === 'gm' && (
               <>

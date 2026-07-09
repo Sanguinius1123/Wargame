@@ -86,7 +86,7 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   let allUnits;
   try {
     allUnits = await fetchAll(() => db.from('units')
-      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level')
+      .select('id, faction_id, unit_type_id, hex_q, hex_r, quantity, hp, fortification_level, continuous_bombard_q, continuous_bombard_r')
       .eq('game_id', gameId));
   } catch (e) {
     return {
@@ -165,7 +165,6 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
   for (const [unitId, unitOrders] of ordersByUnit) {
     for (const o of unitOrders) {
       if (o.order_type === 'bombard') {
-        // Last bombard order wins if somehow duplicated.
         bombardOrders.set(unitId, {
           target_hex_q: o.target_hex_q,
           target_hex_r: o.target_hex_r,
@@ -174,6 +173,21 @@ export async function executeRangedFireStep(db, gameId, turn, movedUnitIds = new
       if (o.order_type === 'fortify') {
         fortifyOrderUnitIds.add(unitId);
       }
+    }
+  }
+
+  // Auto-inject continuous bombard orders for units that have one set,
+  // haven't moved this turn, and have no explicit bombard order.
+  for (const unit of allUnits) {
+    if (
+      unit.continuous_bombard_q != null &&
+      !bombardOrders.has(unit.id) &&
+      !movedUnitIds.has(unit.id)
+    ) {
+      bombardOrders.set(unit.id, {
+        target_hex_q: unit.continuous_bombard_q,
+        target_hex_r: unit.continuous_bombard_r,
+      });
     }
   }
 

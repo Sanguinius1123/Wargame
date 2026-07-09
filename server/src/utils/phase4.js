@@ -414,8 +414,7 @@ export async function processBuildOrders(db, gameId, currentTurn) {
 export async function resetTurnReady(db, gameId) {
   await db.from('game_participants')
     .update({ turn_ready: false })
-    .eq('game_id', gameId)
-    .eq('role', 'player');
+    .eq('game_id', gameId);
 }
 
 // ---------------------------------------------------------------------------

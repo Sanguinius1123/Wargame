@@ -283,7 +283,8 @@ router.post('/:gameId/advance-turn', requireGM, async (req, res) => {
     const result = await resolveTurn(adminDb, req.params.gameId);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[advance-turn] ERROR:', err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
@@ -383,7 +384,13 @@ router.post('/:gameId/load-map/:mapId', requireGM, async (req, res) => {
   // Insert hexes
   const { error: hexErr } = await adminDb.from('hexes').insert(mapHexes.map(h => ({
     game_id: gameId, ...h,
-    vegetation_hp: h.vegetation_hp ?? (h.has_heavy_vegetation ? 20 : h.has_light_vegetation ? 8 : null),
+    vegetation_hp: (h.vegetation_hp > 0)
+      ? h.vegetation_hp
+      : h.has_heavy_vegetation
+        ? (11 + Math.floor(Math.random() * 10))
+        : h.has_light_vegetation
+          ? (1  + Math.floor(Math.random() * 10))
+          : null,
   })));
   if (hexErr) return res.status(500).json({ error: hexErr.message });
 

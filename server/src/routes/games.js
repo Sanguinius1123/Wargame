@@ -20,11 +20,11 @@ router.get('/', requireAuth, async (req, res) => {
   if (games.length) {
     const { data: factionRows } = await adminDb
       .from('factions')
-      .select('game_id')
+      .select('id, game_id')
       .eq('profile_id', req.user.id)
       .in('game_id', games.map(g => g.id));
-    const withFaction = new Set((factionRows ?? []).map(f => f.game_id));
-    return res.json(games.map(g => ({ ...g, has_player_faction: withFaction.has(g.id) })));
+    const factionByGame = new Map((factionRows ?? []).map(f => [f.game_id, f.id]));
+    return res.json(games.map(g => ({ ...g, player_faction_id: factionByGame.get(g.id) ?? null })));
   }
 
   res.json(games);
@@ -80,7 +80,13 @@ router.post('/', requireGM, async (req, res) => {
     if (mapHexes?.length) {
       await adminDb.from('hexes').insert(mapHexes.map(h => ({
         game_id: game.id, ...h,
-        vegetation_hp: h.vegetation_hp ?? (h.has_heavy_vegetation ? 20 : h.has_light_vegetation ? 8 : null),
+        vegetation_hp: (h.vegetation_hp > 0)
+          ? h.vegetation_hp
+          : h.has_heavy_vegetation
+            ? (11 + Math.floor(Math.random() * 10))
+            : h.has_light_vegetation
+              ? (1  + Math.floor(Math.random() * 10))
+              : null,
       })));
     }
 
@@ -203,13 +209,19 @@ router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
 
   if (markErr) return res.status(500).json({ error: markErr.message });
 
-  // Check if all players are ready
-  const [{ data: players }, { data: game }] = await Promise.all([
-    adminDb.from('game_participants').select('turn_ready').eq('game_id', gameId).eq('role', 'player'),
+  // Check if all participants who own a faction are ready (includes GMs playing as a faction)
+  const [{ data: allParticipants }, { data: factionOwners }, { data: game }] = await Promise.all([
+    adminDb.from('game_participants').select('turn_ready, profile_id, role').eq('game_id', gameId),
+    adminDb.from('factions').select('profile_id').eq('game_id', gameId).not('profile_id', 'is', null),
     adminDb.from('games').select('auto_resolve').eq('id', gameId).single(),
   ]);
 
-  const allReady = players?.length > 0 && players.every(p => p.turn_ready);
+  const factionProfileIds = new Set((factionOwners ?? []).map(f => f.profile_id));
+  const mustSubmit = (allParticipants ?? []).filter(p =>
+    p.role === 'player' || (p.role === 'gm' && factionProfileIds.has(p.profile_id))
+  );
+
+  const allReady = mustSubmit.length > 0 && mustSubmit.every(p => p.turn_ready);
 
   if (allReady && game?.auto_resolve !== false) {
     try {
@@ -225,19 +237,24 @@ router.post('/:gameId/finish-turn', requireAuth, async (req, res) => {
     return res.json({ advanced: false, waiting_on: 0, gm_commit_required: true });
   }
 
-  res.json({ advanced: false, waiting_on: players?.filter(p => !p.turn_ready).length ?? 0 });
+  res.json({ advanced: false, waiting_on: mustSubmit.filter(p => !p.turn_ready).length });
 });
 
 // GET /api/games/:gameId/turn-status — GM view: which players are ready
 router.get('/:gameId/turn-status', requireGM, async (req, res) => {
-  const { data, error } = await adminDb
-    .from('game_participants')
-    .select('turn_ready, profiles(username)')
-    .eq('game_id', req.params.gameId)
-    .eq('role', 'player');
+  const gameId = req.params.gameId;
+  const [{ data, error }, { data: factionOwners }] = await Promise.all([
+    adminDb.from('game_participants').select('turn_ready, profile_id, role, profiles(username)').eq('game_id', gameId),
+    adminDb.from('factions').select('profile_id').eq('game_id', gameId).not('profile_id', 'is', null),
+  ]);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data.map(p => ({ username: p.profiles?.username, ready: p.turn_ready })));
+
+  const factionProfileIds = new Set((factionOwners ?? []).map(f => f.profile_id));
+  const relevant = (data ?? []).filter(p =>
+    p.role === 'player' || (p.role === 'gm' && factionProfileIds.has(p.profile_id))
+  );
+  res.json(relevant.map(p => ({ username: p.profiles?.username, ready: p.turn_ready })));
 });
 
 export default router;
