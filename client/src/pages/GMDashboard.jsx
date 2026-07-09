@@ -392,8 +392,108 @@ function CombatLogEntry({ entry }) {
       return `${d.dice ?? 1} dice → ${d.hits_vs_units ?? 0} unit hits, ${d.hits_vs_infra ?? 0} infra hits`;
     }
     const totalCas = Object.values(d.casualties ?? {}).reduce((s, v) => s + v, 0);
-    if (totalCas > 0) return `${d.factions?.length ?? '?'} factions, ${totalCas} casualties`;
+    if (d.volleys?.length) {
+      const parts = d.volleys.map(v => {
+        const firing = v.firing_types.map(f => `${f.type}×${f.qty}`).join('+');
+        const cas = v.targets.reduce((s, t) => s + t.casualties, 0);
+        const tgts = [...new Map(v.targets.map(t => [t.type, t])).values()].map(t => t.type).join('+');
+        return `${v.attacker_faction}: ${firing} → ${tgts} — ${cas} cas`;
+      });
+      return parts.join(' | ');
+    }
+    if (totalCas > 0) return `${totalCas} total casualties`;
     return d.factions?.length ? `${d.factions.length} factions — no casualties` : JSON.stringify(d).slice(0, 60);
+  }
+
+  function renderDetail() {
+    const box = { background: '#0f172a', borderRadius: 3, padding: 8, marginTop: 4, fontSize: 11 };
+
+    // --- Close combat ---
+    if (d.volleys?.length) {
+      return (
+        <div style={box}>
+          {d.volleys.map((v, i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ color: '#fbbf24', fontWeight: 700, marginBottom: 3 }}>
+                {v.attacker_faction}: {v.firing_types.map(f => `${f.type} ×${f.qty}`).join(', ')} → {v.total_dice} dice
+              </div>
+              {v.targets.map((t, j) => (
+                <div key={j} style={{ color: '#94a3b8', paddingLeft: 12, marginBottom: 2 }}>
+                  vs <span style={{ color: '#e2e8f0' }}>{t.type} ×{t.qty}</span> ({t.dice} dice) —{' '}
+                  <span style={{ color: '#ef4444' }}>{t.hits} hit{t.hits !== 1 ? 's' : ''}</span>,{' '}
+                  <span style={{ color: '#60a5fa' }}>{t.saves} saved</span>,{' '}
+                  <span style={{ color: '#f87171', fontWeight: 600 }}>{t.casualties} casualt{t.casualties !== 1 ? 'ies' : 'y'}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // --- Bombardment ---
+    if (entry.log_type === 'bombardment') {
+      const saveTarget = t => Math.max(0, t.defense + t.bonus - d.pen);
+      return (
+        <div style={box}>
+          <div style={{ color: '#fb923c', fontWeight: 700, marginBottom: 4 }}>
+            {d.firer_type} ×{d.firer_count} from ({d.firer_hex?.q},{d.firer_hex?.r}) → ({d.target_hex?.q},{d.target_hex?.r}) | To-Hit ≤{d.to_hit} | Pen {d.pen}
+          </div>
+          <div style={{ color: '#94a3b8', marginBottom: 6 }}>
+            {d.hits_vs_units} unit hit{d.hits_vs_units !== 1 ? 's' : ''} — {Object.values(d.casualties ?? {}).reduce((s,v)=>s+v,0)} casualt{Object.values(d.casualties ?? {}).reduce((s,v)=>s+v,0) !== 1 ? 'ies' : 'y'}{d.hits_vs_infra > 0 ? `, ${d.hits_vs_infra} infra hit${d.hits_vs_infra !== 1 ? 's' : ''}` : ''}
+          </div>
+          {(d.unit_rolls ?? []).map((u, i) => {
+            const st = saveTarget(u);
+            const cas = u.rolls.filter(r => r.casualty).length;
+            return (
+              <div key={i} style={{ marginBottom: 6 }}>
+                <div style={{ color: '#e2e8f0', marginBottom: 2 }}>
+                  {u.unit_type} ×{u.quantity} (Def {u.defense}{u.bonus ? `+${u.bonus}` : ''} → save ≤{st}) — {cas} casualt{cas !== 1 ? 'ies' : 'y'}
+                </div>
+                {u.rolls.map((r, j) => (
+                  <div key={j} style={{ color: r.casualty ? '#f87171' : r.hit ? '#60a5fa' : '#475569', paddingLeft: 12 }}>
+                    Die {j+1}: rolled {r.atk} {r.hit ? `≤${d.to_hit} HIT` : `>${d.to_hit} miss`}
+                    {r.hit && ` | save ${r.save} vs ≤${st} → ${r.casualty ? 'FAIL' : 'saved'}`}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // --- Detection ---
+    if (d.event === 'detection_roll') {
+      return (
+        <div style={box}>
+          <div style={{ color: '#34d399', fontWeight: 700, marginBottom: 4 }}>
+            {d.observer_faction} {d.observer_unit} @ ({d.observer_pos?.q},{d.observer_pos?.r}) spotted {d.target_faction} {d.target_unit} ×{d.stack_size}
+          </div>
+          <div style={{ color: '#64748b', marginBottom: 6, fontSize: 10 }}>
+            Score {d.detection_score} | Stealth {d.base_stealth}{d.terrain_bonus ? `+${d.terrain_bonus} terrain` : ''}{d.stack_stealth_mod ? ` ${d.stack_stealth_mod > 0 ? '+' : ''}${d.stack_stealth_mod} stack` : ''} = {d.effective_stealth} | Detection {d.effective_detection} | Dist {d.distance}
+          </div>
+          {(d.rolls ?? []).map((r, i) => {
+            const detected = r.detected;
+            const rollStr = r.result === 'auto' ? 'AUTO' : r.result === 'impossible' ? 'IMPOSSIBLE' : `rolled ${r.total} vs ≤${d.detection_score}`;
+            return (
+              <div key={i} style={{ color: detected ? '#34d399' : '#475569', paddingLeft: 12 }}>
+                Unit {i+1}: {rollStr} → {detected ? 'DETECTED' : 'undetected'}
+              </div>
+            );
+          })}
+          <div style={{ color: d.detected_count > 0 ? '#34d399' : '#475569', fontWeight: 600, marginTop: 4 }}>
+            {d.detected_count}/{d.stack_size} detected
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <pre style={{ color: '#64748b', fontSize: 10, background: '#0f172a', borderRadius: 3, padding: 6, marginTop: 4, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        {JSON.stringify(entry.data, null, 2)}
+      </pre>
+    );
   }
 
   const typeColor = LOG_TYPE_COLOR[entry.log_type] ?? '#94a3b8';
@@ -411,11 +511,7 @@ function CombatLogEntry({ entry }) {
         <span style={{ color: '#94a3b8', fontSize: 11 }}>{summary()}</span>
         <span style={{ color: '#334155', fontSize: 10, marginLeft: 'auto' }}>{open ? '▲' : '▼'}</span>
       </div>
-      {open && (
-        <pre style={{ color: '#64748b', fontSize: 10, background: '#0f172a', borderRadius: 3, padding: 6, marginTop: 4, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {JSON.stringify(entry.data, null, 2)}
-        </pre>
-      )}
+      {open && renderDetail()}
     </div>
   );
 }

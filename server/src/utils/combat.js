@@ -146,24 +146,19 @@ function detectionCheck(detRating, stealthRating, distance) {
 function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
   const casualties = new Map(); // unit_id → casualty count
   const log = [];
+  const volleys = []; // structured summary, one entry per attacker faction
 
   const factionIds = [...factionGroups.keys()];
 
-  // For each attacking faction, fire at all enemy factions.
   for (const attackerFactionId of factionIds) {
     const attackers = factionGroups.get(attackerFactionId);
 
-    // Gather all enemy units (all other factions in this hex).
     const enemies = [];
     for (const fId of factionIds) {
-      if (fId !== attackerFactionId) {
-        enemies.push(...factionGroups.get(fId));
-      }
+      if (fId !== attackerFactionId) enemies.push(...factionGroups.get(fId));
     }
-
     if (!enemies.length) continue;
 
-    // Only units with to_hit can fire.
     const firingUnits = attackers.filter((u) => {
       const cfg = unitTypeById.get(u.unit_type_id);
       return cfg && cfg.to_hit != null;
@@ -174,30 +169,25 @@ function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
       continue;
     }
 
-    // Build the total dice pool across all firing units.
-    // Each firing unit contributes `quantity` dice.
     const totalDice = firingUnits.reduce((s, u) => s + u.quantity, 0);
-
-    // Build target list with weights = quantity.
     const targets = enemies.map((u) => ({ id: u.id, weight: u.quantity }));
-
-    // Distribute the total dice pool among enemy units.
     const dicePerTarget = distributeDice(totalDice, targets);
 
-    log.push(
-      `Faction ${attackerFactionId} fires ${totalDice} dice against ${enemies.length} enemy unit(s).`
-    );
+    // Build structured firing summary grouped by unit type.
+    const byType = new Map();
+    for (const u of firingUnits) {
+      const name = unitTypeById.get(u.unit_type_id)?.name ?? 'Unknown';
+      byType.set(name, (byType.get(name) ?? 0) + u.quantity);
+    }
+    const volley = {
+      attacker_faction_id: attackerFactionId,
+      firing_types: [...byType.entries()].map(([type, qty]) => ({ type, qty })),
+      total_dice: totalDice,
+      targets: [],
+    };
 
-    // We need the per-firing-unit to_hit in case individual units differ.
-    // However, for proportional allocation the dice pool is aggregate.
-    // We attribute dice to firing units in proportion to their quantity so
-    // we can apply the correct to_hit per die.
-    //
-    // Simpler approach that is faithful to the rules: allocate dice to targets
-    // and then for each die pick the to_hit of a random firing unit weighted
-    // by its contribution to the pool. This matches "the group fires together".
-    //
-    // For each target unit, roll its allocated dice.
+    log.push(`Faction ${attackerFactionId} fires ${totalDice} dice against ${enemies.length} enemy unit(s).`);
+
     for (const enemy of enemies) {
       const dicesToRoll = dicePerTarget.get(enemy.id) ?? 0;
       if (dicesToRoll === 0) continue;
@@ -209,11 +199,9 @@ function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
         b => b.type === 'fortification' && b.current_hp > 0 && b.owner_faction_id === enemy.faction_id
       );
       const bonus = defenseBonus(enemy, hex, hasFortBuilding);
-      let enemyCasualties = 0;
+      let hits = 0, saves = 0, enemyCasualties = 0;
 
       for (let d = 0; d < dicesToRoll; d++) {
-        // Each die is attributed to one firing unit so to_hit and penetration
-        // are always from the same unit (no split-draw mismatches).
         const firer = pickFiringUnit(firingUnits, unitTypeById);
         const toHit = firer?.to_hit ?? 6;
         const pen   = firer?.penetration ?? 0;
@@ -222,13 +210,11 @@ function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
         const hit = attackRoll <= toHit;
 
         if (!hit) {
-          log.push(
-            `  → Die vs unit ${enemy.id}: attack roll ${attackRoll} vs to_hit ${toHit} — miss.`
-          );
+          log.push(`  → Die vs unit ${enemy.id}: attack roll ${attackRoll} vs to_hit ${toHit} — miss.`);
           continue;
         }
 
-        // Hit! Roll save.
+        hits++;
         const saveTarget = enemyCfg.defense + bonus - pen;
         const saveRoll = roll2d6();
         const saved = saveRoll <= Math.max(0, saveTarget);
@@ -237,19 +223,29 @@ function resolveHexCombat(factionGroups, hex, unitTypeById, hexBuildings = []) {
           `  → Die vs unit ${enemy.id} (${enemyCfg.name}): attack ${attackRoll}/${toHit} HIT, save ${saveRoll}/${Math.max(saveTarget, 0)}${saved ? ' SAVED' : ' CASUALTY'}${bonus ? ` (defense bonus +${bonus})` : ''}.`
         );
 
-        if (!saved) {
-          enemyCasualties += 1;
-        }
+        if (saved) { saves++; } else { enemyCasualties++; }
       }
 
       if (enemyCasualties > 0) {
         casualties.set(enemy.id, (casualties.get(enemy.id) ?? 0) + enemyCasualties);
         log.push(`  Unit ${enemy.id} (${enemyCfg.name}): ${enemyCasualties} casualty/ies queued.`);
       }
+
+      volley.targets.push({
+        unit_id: enemy.id,
+        type: enemyCfg.name,
+        qty: enemy.quantity,
+        dice: dicesToRoll,
+        hits,
+        saves,
+        casualties: enemyCasualties,
+      });
     }
+
+    volleys.push(volley);
   }
 
-  return { casualties, log };
+  return { casualties, log, volleys };
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +381,12 @@ export async function executeGroundCombat(db, gameId, turn) {
   }
 
   // -----------------------------------------------------------------------
+  // 3a. Load faction names for readable combat log entries.
+  // -----------------------------------------------------------------------
+  const { data: factionRows } = await db.from('factions').select('id, name').eq('game_id', gameId);
+  const factionNameById = new Map((factionRows ?? []).map(f => [f.id, f.name]));
+
+  // -----------------------------------------------------------------------
   // 3. Load unit_type_config for all unit types present in the game.
   // -----------------------------------------------------------------------
   const unitTypeIds = [...new Set(allUnits.map((u) => u.unit_type_id))];
@@ -471,6 +473,11 @@ export async function executeGroundCombat(db, gameId, turn) {
       casualtiesObj[unitId] = count;
     }
 
+    const volleys = hexResult.volleys.map(v => ({
+      ...v,
+      attacker_faction: factionNameById.get(v.attacker_faction_id) ?? v.attacker_faction_id,
+    }));
+
     combatLogInserts.push({
       game_id: gameId,
       turn,
@@ -482,6 +489,7 @@ export async function executeGroundCombat(db, gameId, turn) {
       data: {
         factions: factionsInvolved,
         casualties: casualtiesObj,
+        volleys,
         log: hexResult.log,
       },
     });
