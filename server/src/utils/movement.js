@@ -495,6 +495,8 @@ export async function executeGroundMoves(db, gameId, turn) {
   const unitPaths = [];
   // unitPathMap: Map<unitId, { unit, unitType }> — for patrol intercept lookups.
   const unitPathMap = new Map();
+  // pathByUnitId: Map<unitId, [{q,r}]> — full ordered path for each mover.
+  const pathByUnitId = new Map();
   for (const [unitId, entry] of unitOrdersMap) {
     entry.waypoints.sort((a, b) => a.sequence - b.sequence);
     // Waypoints already include the start hex at sequence 0 (sent by the client).
@@ -502,6 +504,7 @@ export async function executeGroundMoves(db, gameId, turn) {
     const path = entry.waypoints.map((w) => ({ q: w.q, r: w.r }));
     unitPaths.push({ unitId, unit: entry.unit, unitType: entry.unitType, path });
     unitPathMap.set(unitId, { unit: entry.unit, unitType: entry.unitType });
+    pathByUnitId.set(unitId, path);
   }
 
   // ------------------------------------------------------------------
@@ -554,6 +557,41 @@ export async function executeGroundMoves(db, gameId, turn) {
       finalR: finalHex.r,
       unit,
     });
+  }
+
+  // ------------------------------------------------------------------
+  // 4a. Enemy-hex truncation: if a unit's path passes through a hex
+  //     already occupied by an enemy at the START of movement, stop
+  //     the unit at the first such hex instead of the intended destination.
+  //     Close combat will then resolve at that hex in the combat step.
+  // ------------------------------------------------------------------
+  {
+    const { data: occupancyRows } = await db
+      .from('units')
+      .select('id, faction_id, hex_q, hex_r')
+      .eq('game_id', gameId);
+
+    const hexFactions = new Map(); // "q,r" → Set<faction_id>
+    for (const u of occupancyRows ?? []) {
+      const key = `${u.hex_q},${u.hex_r}`;
+      if (!hexFactions.has(key)) hexFactions.set(key, new Set());
+      hexFactions.get(key).add(u.faction_id);
+    }
+
+    for (const move of validMoves) {
+      const path = pathByUnitId.get(move.unitId);
+      if (!path) continue;
+      const moverFaction = move.unit.faction_id;
+      for (let si = 1; si < path.length; si++) {
+        const step = path[si];
+        const factions = hexFactions.get(`${step.q},${step.r}`);
+        if (factions && [...factions].some(f => f !== moverFaction)) {
+          move.finalQ = step.q;
+          move.finalR = step.r;
+          break;
+        }
+      }
+    }
   }
 
   // ------------------------------------------------------------------

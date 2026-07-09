@@ -141,7 +141,7 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
 
   const { data: units } = await adminDb
     .from('units')
-    .select('id, quantity, hp, standing_order, fortification_level, faction_id, factions(name, color), unit_type_config(name, tags, to_hit, defense, penetration, atk_range, move, los, bombard_range, bombard_to_hit, overwatch_to_hit, overwatch_range, stealth_rating)')
+    .select('id, quantity, hp, standing_order, fortification_level, faction_id, detected_quantities, factions(name, color), unit_type_config(name, tags, to_hit, defense, penetration, atk_range, move, los, bombard_range, bombard_to_hit, overwatch_to_hit, overwatch_range, stealth_rating)')
     .eq('game_id', gameId)
     .eq('hex_q', q)
     .eq('hex_r', r);
@@ -155,8 +155,9 @@ router.get('/:gameId/hexes/:q/:r', requireAuth, async (req, res) => {
 
   const sanitized = (units ?? []).flatMap(u => {
     if (!playerFactionId || u.faction_id === playerFactionId) return [u];
-    // Enemy stealth units (submarines) are hidden — same rule as the bulk /hexes endpoint.
-    if ((u.unit_type_config?.tags ?? []).includes('stealth')) return [];
+    // Enemy stealth units hidden unless detected by this player's faction.
+    const detectedQty = (u.detected_quantities ?? {})[playerFactionId] ?? 0;
+    if ((u.unit_type_config?.tags ?? []).includes('stealth') && detectedQty === 0) return [];
     return [{
       id: u.id,
       quantity: u.quantity,

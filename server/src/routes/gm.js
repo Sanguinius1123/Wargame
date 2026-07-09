@@ -71,7 +71,7 @@ router.post('/:gameId/units', requireGM, async (req, res) => {
 
   const { data: unitType } = await adminDb
     .from('unit_type_config')
-    .select('id')
+    .select('id, hp')
     .eq('game_id', gameId)
     .eq('name', unit_type_name)
     .single();
@@ -81,7 +81,7 @@ router.post('/:gameId/units', requireGM, async (req, res) => {
   // Check for existing stack
   const { data: existing } = await adminDb
     .from('units')
-    .select('id, quantity')
+    .select('id, quantity, hp')
     .eq('game_id', gameId)
     .eq('faction_id', faction_id)
     .eq('unit_type_id', unitType.id)
@@ -90,9 +90,11 @@ router.post('/:gameId/units', requireGM, async (req, res) => {
     .maybeSingle();
 
   if (existing) {
+    const updateData = { quantity: existing.quantity + quantity };
+    if (unitType.hp != null) updateData.hp = (existing.hp ?? 0) + unitType.hp * quantity;
     const { data, error } = await adminDb
       .from('units')
-      .update({ quantity: existing.quantity + quantity })
+      .update(updateData)
       .eq('id', existing.id)
       .select()
       .single();
@@ -100,9 +102,11 @@ router.post('/:gameId/units', requireGM, async (req, res) => {
     return res.json(data);
   }
 
+  const insertData = { game_id: gameId, faction_id, unit_type_id: unitType.id, hex_q, hex_r, quantity };
+  if (unitType.hp != null) insertData.hp = unitType.hp * quantity;
   const { data, error } = await adminDb
     .from('units')
-    .insert({ game_id: gameId, faction_id, unit_type_id: unitType.id, hex_q, hex_r, quantity })
+    .insert(insertData)
     .select()
     .single();
 
