@@ -595,6 +595,44 @@ export async function executeGroundMoves(db, gameId, turn) {
   }
 
   // ------------------------------------------------------------------
+  // 4a-b. Convergence collision: if a unit's path passes through a hex
+  //       where an enemy unit intends to land this turn, stop at that hex.
+  //       Iterate up to 3 times to handle chains (A stops because of B,
+  //       which then reveals B also needs to stop earlier, etc.).
+  // ------------------------------------------------------------------
+  for (let iter = 0; iter < 3; iter++) {
+    // Build map of each unit's current intended final hex → faction_ids landing there.
+    const intendedFinals = new Map();
+    for (const move of validMoves) {
+      const key = `${move.finalQ},${move.finalR}`;
+      if (!intendedFinals.has(key)) intendedFinals.set(key, new Set());
+      intendedFinals.get(key).add(move.unit.faction_id);
+    }
+
+    let anyChanged = false;
+    for (const move of validMoves) {
+      const path = pathByUnitId.get(move.unitId);
+      if (!path) continue;
+      const moverFaction = move.unit.faction_id;
+      // Walk only up to the current final hex (may already be truncated by 4a).
+      for (let si = 1; si < path.length; si++) {
+        const step = path[si];
+        const factions = intendedFinals.get(`${step.q},${step.r}`);
+        if (factions && [...factions].some(f => f !== moverFaction)) {
+          if (move.finalQ !== step.q || move.finalR !== step.r) {
+            move.finalQ = step.q;
+            move.finalR = step.r;
+            anyChanged = true;
+          }
+          break;
+        }
+        if (step.q === move.finalQ && step.r === move.finalR) break;
+      }
+    }
+    if (!anyChanged) break;
+  }
+
+  // ------------------------------------------------------------------
   // 4b. Ground patrol intercept pass.
   //     Run before any moves are applied. Cancelled moves are excluded
   //     from the position-update step below.
