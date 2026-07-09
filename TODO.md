@@ -4,6 +4,9 @@
 
 ## Bugs / Immediate Fixes
 
+- [ ] **⚠️ Run migration 013 in Supabase SQL Editor** — adds `safety` to standing_order CHECK constraint (submarine stealth mode crashes without it): `ALTER TABLE units DROP CONSTRAINT IF EXISTS units_standing_order_check; ALTER TABLE units ADD CONSTRAINT units_standing_order_check CHECK (standing_order IN ('hold_position', 'patrol', 'hold_fire', 'fortify', 'safety'));`
+- [ ] **Race condition on finish-turn** — two simultaneous POST /finish-turn calls can both pass the "all players ready?" check and double-resolve the turn. Needs DB-level idempotency (e.g. check + update in a single transaction or use a lock).
+- [ ] **Damaged factory blocks all production** — should reduce slot count (`floor(current_hp/2)`) not hard-error. `map.js` ~line 313.
 - [ ] **Naval path-crossing detection misses B-C crossing when A-B fires first** — In `navalPhase.js` step loop, once a unit is added to `processed` after crossing with unit A, it won't be checked for a second crossing with unit C in the same step. Very rare edge case (3 ships crossing in the same step). Lower priority.
 - [ ] **Repair slot cap not enforced** — `phase4.js` advances repair orders without checking whether the airbase/harbor has available slots (floor(current_hp/2)). Multiple units can be repaired simultaneously beyond capacity.
 - [ ] **AA overwatch fires at undetected aircraft** — `rangedFire.js` AA pass doesn't check detection before firing. AA should only fire at detected flight groups (effective_stealth = 0 = auto-detected; stealth > 0 = detection roll required).
